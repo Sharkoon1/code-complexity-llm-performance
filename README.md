@@ -1,5 +1,7 @@
 # Code Complexity and LLM Performance
 
+[![Runpod](https://api.runpod.io/badge/Sharkoon1/code-complexity-llm-performance)](https://console.runpod.io/hub/Sharkoon1/code-complexity-llm-performance)
+
 Bachelor's thesis investigating whether code complexity metrics predict LLM performance on real-world software engineering tasks. Compares classical metrics (cyclomatic, Halstead, LOC) and LM-CC on SWE-bench Verified.
 
 ## Approach

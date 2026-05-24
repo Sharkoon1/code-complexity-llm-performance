@@ -1,0 +1,16 @@
+{
+  "tests": [
+    {
+      "name": "smoke",
+      "input": {
+        "code": "def add(a, b):\n    return a + b\n"
+      },
+      "timeout": 60000
+    }
+  ],
+  "config": {
+    "gpuTypeId": "NVIDIA GeForce RTX 4090",
+    "gpuCount": 1,
+    "allowedCudaVersions": ["12.4"]
+  }
+}
