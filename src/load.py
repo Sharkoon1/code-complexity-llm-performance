@@ -8,17 +8,16 @@ from src.shared import cache_path
 
 logger = logging.getLogger(__name__)
 
-def load_swe_bench():
+def load_swe_bench() -> pd.DataFrame:
     ds = load_dataset(
         "princeton-nlp/SWE-bench_Verified",
         split="test",
         revision=PATHS.REVISION,
     )
-    df = ds.to_pandas()
-    df.to_parquet("data/raw/swebench_verified.parquet")
+    return ds.to_pandas()
 
 
-def fetch_model_bench_predictions(predicition_set: str):
+def fetch_model_bench_predictions(predicition_set: str) -> pd.DataFrame:
     url = (
         "https://raw.githubusercontent.com/SWE-bench/experiments/"
         "main/evaluation/verified/"
@@ -52,7 +51,7 @@ def fetch_model_bench_predictions(predicition_set: str):
     )
     df["resolved"] = df["status"] == "resolved"
 
-    df.to_parquet("data/raw/agentless_claude35sonnet_labels.parquet")
+    return df
 
 
 def _fetch_github_pre_patch_file(repo: str, base_commit: str, file_path: str) -> str:

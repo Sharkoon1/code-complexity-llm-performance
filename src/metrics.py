@@ -41,7 +41,6 @@ def compute_metrics(filtered_dataset: pd.DataFrame) -> pd.DataFrame:
         metrics_list.append(metrics)
 
     metrics_df = pd.DataFrame(metrics_list)
-    metrics_df.to_parquet(PATHS.RESULTS / "result.parquet")
     return metrics_df
 
 def _compute_cyclomatic(code: str) -> dict:

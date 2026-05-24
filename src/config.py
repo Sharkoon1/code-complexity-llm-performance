@@ -23,5 +23,6 @@ class Config:
     AGENTLESS_LABELS: Path = RAW / "agentless_claude35sonnet_labels.parquet"
     LABELED_DATASET: Path = INTERIM / "swebench_claude35sonnet.parquet"
     RESULTS_DATASET: Path = RESULTS / "result.parquet"
-
+    FILTERED_DATASET: Path = INTERIM / "swebench_claude35sonnet_filtered.parquet" 
+    RESULT_DATASET: Path = RESULTS / "result.parquet"
 PATHS = Config()  

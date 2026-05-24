@@ -25,5 +25,4 @@ def build_labeled_dataset() -> pd.DataFrame:
     logger.info(f"Status distribution:\n{df['status'].value_counts().to_string()}")
     logger.info(f"Resolve rate: {df['resolved'].mean():.1%}")
 
-    df.to_parquet(PATHS.LABELED_DATASET)
     return df
