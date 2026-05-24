@@ -9,12 +9,15 @@ ENV LM_CC_DEVICE=cuda
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir transformers accelerate runpod requests
+RUN pip install --no-cache-dir \
+    "transformers==4.46.3" \
+    "accelerate==1.1.1" \
+    "huggingface_hub>=0.26,<0.28" \
+    runpod requests
 
-RUN python -c "import os; from transformers import AutoTokenizer, AutoModelForCausalLM; \
+RUN python -c "import os; from huggingface_hub import snapshot_download; \
     token = os.environ.get('HF_TOKEN') or None; \
-    AutoTokenizer.from_pretrained(os.environ['LM_CC_MODEL'], token=token); \
-    AutoModelForCausalLM.from_pretrained(os.environ['LM_CC_MODEL'], token=token)"
+    snapshot_download(repo_id=os.environ['LM_CC_MODEL'], token=token)"
 
 COPY src/ /app/src/
 COPY serverless/handler.py /app/handler.py
