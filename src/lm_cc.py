@@ -202,17 +202,21 @@ def _compute_token_features_local(code: str) -> TokenFeatures:
     offsets = inputs.pop("offset_mapping")
     inputs = inputs.to(_model.device)
 
-    logits = _model(**inputs).logits
+    hidden = _model.model(**inputs).last_hidden_state   # (1, n, hidden_dim)
 
     chunk_size = int(os.environ.get("LM_CC_ENTROPY_CHUNK", "256"))
-    entropy = torch.empty(logits.shape[:2], device=logits.device, dtype=torch.float32)
-    for i in range(0, logits.shape[1], chunk_size):
+    n = hidden.shape[1]
+    entropy = torch.empty((1, n), device=hidden.device, dtype=torch.float32)
+    
+    for i in range(0, n, chunk_size):
         sl = slice(i, i + chunk_size)
-        log_probs = F.log_softmax(logits[:, sl], dim=-1)
+        chunk_logits = _model.lm_head(hidden[:, sl])           # only chunk logits
+        log_probs = F.log_softmax(chunk_logits, dim=-1)
         entropy[:, sl] = -(log_probs.exp() * log_probs).sum(dim=-1)
-        del log_probs
-    del logits
-
+        del chunk_logits, log_probs
+    
+    del hidden
+    
     return TokenFeatures(
         tokens=inputs.input_ids[0, 1:].cpu(),
         entropy=entropy[0, :-1].cpu(),
