@@ -11,7 +11,6 @@
   "config": {
     "gpuTypeIds": [
       "NVIDIA GeForce RTX 4090",
-      "NVIDIA GeForce RTX 5090",
       "NVIDIA A40",
       "NVIDIA RTX A5000",
       "NVIDIA RTX A6000",
