@@ -34,6 +34,29 @@ This will:
 2. Compute metrics for each task's target file
 3. Save results to `results/result.parquet`
 
+**Local vs. remote LM-CC.** By default (`LOCAL_LM_CC` unset or `true`) the LM-CC forward pass runs locally. Set `LOCAL_LM_CC=false` to offload it — see below.
+
+## Remote inference (optional)
+
+LM-CC can offload the forward pass to any HTTP endpoint - useful for running a larger model (e.g. CodeLlama-7b) on a GPU host while the rest of the pipeline stays local. Set `LOCAL_LM_CC=false` plus the endpoint in a `.env` file (see [.env.example](.env.example)):
+
+```
+LOCAL_LM_CC=false
+LM_CC_REMOTE_URL=https://your-endpoint/...
+LM_CC_REMOTE_KEY=<bearer-token>
+```
+
+Then run `uv run --env-file .env main.py`. If `LOCAL_LM_CC` is unset or set to `true`, the remote env vars are ignored and the pipeline runs the local model.
+
+**Endpoint contract**:
+
+- `POST <url>` with header `Authorization: Bearer <key>`
+- Request body: `{"input": {"code": "<source>"}}`
+- Response body: `{"output": {"tokens": [...], "entropy": [...], "offsets": [[s, e], ...]}}`
+  - `tokens`: `int[n]`
+  - `entropy`: `float[n]`
+  - `offsets`: `int[n][2]` — char spans into the input string
+
 ## References
 
 - Xie, C., Shi, Y., Gu, X., & Shen, B. (2026). *Rethinking Code Complexity Through the Lens of Large Language Models*. arXiv:2602.07882

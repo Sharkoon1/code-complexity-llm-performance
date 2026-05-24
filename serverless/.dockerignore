@@ -1,0 +1,13 @@
+data/
+logs/
+notebooks/
+results/
+.venv/
+env/
+.ipynb_checkpoints/
+**/__pycache__/
+**/*.pyc
+.git/
+.env
+*.parquet
+*.pdf
