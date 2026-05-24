@@ -1,6 +1,8 @@
 import pandas as pd
 import ast
 import logging
+import tokenize
+import io
 from dataclasses import dataclass
 from src.config import PATHS
 from src.shared import cache_path
@@ -32,6 +34,10 @@ def compute_metrics(filtered_dataset: pd.DataFrame) -> pd.DataFrame:
                 **_compute_cyclomatic(code),
                 **_compute_halstead(code),
                 **_compute_loc(code),
+                **_compute_nesting(code),
+                **_compute_token_count(code),
+                **_compute_function_count(code),
+                **_compute_branches(code),
                 **compute_lm_cc(code),
             })
         except Exception as e:
@@ -74,3 +80,53 @@ def _compute_loc(code: str) -> dict:
         "lloc": raw.lloc,
         "sloc": raw.sloc,
     }
+
+def _max_nesting_depth(node, current_depth=0):
+    max_depth = current_depth
+    
+    nesting_types = (ast.If, ast.For, ast.While, ast.AsyncFor, ast.Try, ast.With)
+    
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, nesting_types):
+            child_depth = _max_nesting_depth(child, current_depth + 1)
+        else:
+            child_depth = _max_nesting_depth(child, current_depth)
+        max_depth = max(max_depth, child_depth)
+    
+    return max_depth
+
+def _compute_nesting(code: str) -> dict:
+    tree = ast.parse(code)
+    max_depth = _max_nesting_depth(tree)
+    return {"nesting_max": max_depth}
+
+def _compute_token_count(code: str) -> dict:
+    tokens = list(tokenize.generate_tokens(io.StringIO(code).readline))
+    meaningful_types = {tokenize.NAME, tokenize.OP, tokenize.NUMBER, tokenize.STRING}
+    meaningful_tokens = [t for t in tokens if t.type in meaningful_types]
+    
+    return {
+        "n_tokens_total": len(tokens),
+        "n_tokens_meaningful": len(meaningful_tokens),
+    }
+
+def _compute_function_count(code: str) -> dict:
+    tree = ast.parse(code)
+    
+    n_funcs = sum(1 for node in ast.walk(tree) 
+                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))
+    n_classes = sum(1 for node in ast.walk(tree) 
+                    if isinstance(node, ast.ClassDef))
+    
+    return {
+        "n_functions": n_funcs,
+        "n_classes": n_classes,
+    }
+
+def _compute_branches(code: str) -> dict:
+    tree = ast.parse(code)
+    
+    branch_types = (ast.If, ast.For, ast.While, ast.Try, ast.AsyncFor)
+    n_branches = sum(1 for node in ast.walk(tree) if isinstance(node, branch_types))
+    
+    return {"n_branches": n_branches}
