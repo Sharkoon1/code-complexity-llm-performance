@@ -222,24 +222,34 @@ def _compute_token_features_remote(code: str) -> TokenFeatures:
         raise RuntimeError("LM_CC_REMOTE_URL and LM_CC_REMOTE_KEY missing.")
 
     timeout_seconds = float(os.environ.get("LM_CC_REMOTE_TIMEOUT", "600"))
+    headers = {"Authorization": f"Bearer {api_key}"}
 
     try:
         response = requests.post(
             endpoint_url,
             json={"input": {"code": code}},
-            headers={"Authorization": f"Bearer {api_key}"},
+            headers=headers,
             timeout=timeout_seconds,
         )
         response.raise_for_status()
+        response_body = response.json()
     except requests.RequestException as exc:
         logger.error("Remote inference failed.")
         raise RuntimeError(f"Remote inference request failed: {exc}.") from exc
-
-    try:
-        response_body = response.json()
     except ValueError as exc:
         logger.error("Remote returned unparsable json body: %s.", response.text[:500])
         raise RuntimeError("Remote returned unparsable json body.") from exc
+
+    status = response_body.get("status")
+    if status in ("IN_QUEUE", "IN_PROGRESS"):
+        job_id = response_body.get("id")
+        if not job_id:
+            raise RuntimeError(f"Response has status {status} but no job id.")
+        response_body = _poll_until_complete(
+            endpoint_url, job_id, headers, timeout_seconds
+        )
+    elif status in ("FAILED", "CANCELLED", "TIMED_OUT"):
+        raise RuntimeError(f"Remote job ended with status {status}: {response_body}.")
 
     output = response_body.get("output")
     if not output or not all(
@@ -253,3 +263,32 @@ def _compute_token_features_remote(code: str) -> TokenFeatures:
         entropy=torch.tensor(output["entropy"], dtype=torch.float32),
         offsets=torch.tensor(output["offsets"], dtype=torch.int64),
     )
+
+
+def _poll_until_complete(
+    endpoint_url: str, job_id: str, headers: dict, timeout_seconds: float
+) -> dict:
+    base, _, _ = endpoint_url.rpartition("/")
+    status_url = f"{base}/status/{job_id}"
+
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        if time.monotonic() > deadline:
+            raise RuntimeError(
+                f"Remote job {job_id} did not complete in {timeout_seconds}s."
+            )
+        try:
+            response = requests.get(status_url, headers=headers, timeout=30)
+            response.raise_for_status()
+            body = response.json()
+        except (requests.RequestException, ValueError) as exc:
+            raise RuntimeError(f"Polling job {job_id} failed: {exc}.") from exc
+
+        status = body.get("status")
+        if status == "COMPLETED":
+            return body
+        if status in ("FAILED", "CANCELLED", "TIMED_OUT"):
+            raise RuntimeError(
+                f"Remote job {job_id} ended with status {status}: {body}."
+            )
+        time.sleep(1.0)
