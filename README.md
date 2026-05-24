@@ -38,6 +38,8 @@ This will:
 
 **Local vs. remote LM-CC.** By default (`LOCAL_LM_CC` unset or `true`) the LM-CC forward pass runs locally. Set `LOCAL_LM_CC=false` to offload it — see below.
 
+`LM_CC_ENTROPY_CHUNK` (default `256`) splits the entropy reduction along the sequence dimension to bound GPU memory on long files. 
+
 ## Remote inference (optional)
 
 LM-CC can offload the forward pass to any HTTP endpoint - useful for running a larger model (e.g. CodeLlama-7b) on a GPU host while the rest of the pipeline stays local. Set `LOCAL_LM_CC=false` plus the endpoint in a `.env` file (see [.env.example](.env.example)):
