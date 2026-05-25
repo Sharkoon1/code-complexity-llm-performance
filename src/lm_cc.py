@@ -65,9 +65,8 @@ def compute_lm_cc(code: str) -> dict:
     segments = _mask_to_segments(boundaries)
     # 4. semantic hierachy
     hierachy = _build_hierarchy(segments, features, processed_code, indent_levels)
-    score = _aggregate(hierachy)
 
-    return {"lm_cc": score}
+    return _aggregate(hierachy)
 
 
 def _preprocess_code(code: str) -> tuple[str, dict[int, int]]:
@@ -108,20 +107,43 @@ def _preprocess_code(code: str) -> tuple[str, dict[int, int]]:
     return tokenize.untokenize(kept_tokens), indent_levels
 
 
-def _aggregate(root: SemanticUnit, alpha: float = 0.8) -> float:
-    score = 0.0
+def _aggregate(root: SemanticUnit, alpha: float = 0.8) -> dict:
+    depths = []
+    branches = []
 
     def walk(node):
-        nonlocal score
         if node.depth > 0:  # skip root
-            b = len(node.children)  # branching factor (number of tree children)
-            d = node.depth  # compositional level (deepness of tree)
-            score += alpha * b + (1 - alpha) * d
+            depths.append(node.depth)
+            branches.append(len(node.children))
         for child in node.children:
             walk(child)
 
     walk(root)
-    return score
+
+    if not depths:
+        return {
+            "lm_cc_score": 0.0,
+            "lm_cc_max_comp": 0,
+            "lm_cc_avg_comp": 0.0,
+            "lm_cc_total_comp": 0,
+            "lm_cc_max_branch": 0,
+            "lm_cc_avg_branch": 0.0,
+            "lm_cc_total_branch": 0,
+        }
+
+    total_comp = sum(depths)
+    total_branch = sum(branches)
+    score = alpha * total_branch + (1 - alpha) * total_comp
+
+    return {
+        "lm_cc_score": score,
+        "lm_cc_max_comp": max(depths),
+        "lm_cc_avg_comp": total_comp / len(depths),
+        "lm_cc_total_comp": total_comp,
+        "lm_cc_max_branch": max(branches),
+        "lm_cc_avg_branch": total_branch / len(branches),
+        "lm_cc_total_branch": total_branch,
+    }
 
 
 def _build_hierarchy(
