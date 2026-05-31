@@ -24,7 +24,8 @@ def compute_metrics(filtered_dataset: pd.DataFrame) -> pd.DataFrame:
 
     for _, row in tqdm(filtered_dataset.iterrows(), total=len(filtered_dataset)):
         cache = cache_path(row["repo"], row["base_commit"], row["python_files"][0])
-        code = cache.read_text()
+        raw_code = cache.read_text()
+        code = _normalize_code(raw_code)
 
         metrics = {"instance_id": row["instance_id"]}
         
@@ -48,6 +49,21 @@ def compute_metrics(filtered_dataset: pd.DataFrame) -> pd.DataFrame:
 
     metrics_df = pd.DataFrame(metrics_list)
     return metrics_df
+
+def _normalize_code(code:str) -> str: 
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return code
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.FunctionDef,
+                             ast.AsyncFunctionDef, ast.ClassDef)):
+            if (node.body
+                    and isinstance(node.body[0], ast.Expr)
+                    and isinstance(node.body[0].value, ast.Constant)
+                    and isinstance(node.body[0].value.value, str)):
+                node.body.pop(0)
+    return ast.unparse(tree)    
 
 def _compute_cyclomatic(code: str) -> dict:
     results = cc_visit(code)

@@ -7,7 +7,7 @@ and the `$?$` quirk). The whole template is sent as a SINGLE user message,
 which is the closest faithful port of CodeMind's single-string prompt to the
 DeepSeek chat API.
 
-Did not write this myself, its to validate the lm cc and compare it to the original paper.
+Did not write this myself, its an extension of the code mind create_prompt_gpt_codeqwen to validate the lm cc scores and compare it to the original paper lm cc scores.
 """
 
 # ---------------------------------------------------------------------------
@@ -163,6 +163,13 @@ import ast
 import re
 
 
+# Sentinel for expected values that couldn't be reduced to a Python literal
+# (e.g. `tuple(sort_third([1, 2, 3]))` on the RHS of an assert).
+class _NonLiteralExpected(str):
+    """A string subclass tagging unresolved expected expressions."""
+    __slots__ = ()
+
+
 def humaneval_to_triple(problem):
     """Turn one HumanEval problem record into an IER triple.
 
@@ -174,7 +181,10 @@ def humaneval_to_triple(problem):
                 (LM-CC normalizes by stripping comments/docstrings).
       - code_input = "<entry_point>(<args>)" pulled from the FIRST assert in
                      the test harness.
-      - expected_output = the literal the first assert compares against.
+      - expected_output = the actual Python value the first assert compares
+                          against (e.g. the string "010010", not "'010010'"),
+                          or a `_NonLiteralExpected` if the RHS is itself an
+                          expression that can't be literal-eval'd.
 
     Returns (code, code_input, expected_output) or None if no assert was found.
     """
@@ -213,12 +223,12 @@ def _strip_comments_and_docstrings(src):
 
 
 def _first_assert_call(test_src, entry_point):
-    """Extract (call_expr_string, expected_literal_string) from first assert.
+    """Extract (call_expr_string, expected_value) from the first assert.
 
-    Handles the common HumanEval shapes:
-        assert candidate(<args>) == <value>
-        assert func(<args>) == <value>
-    where the test wraps the function as `candidate = <entry_point>`.
+    expected_value is the actual Python value (str, int, list, ...) when the
+    RHS of the assert is a literal. If the RHS is an expression that can't be
+    parsed as a literal, we return its source as a `_NonLiteralExpected` so
+    the caller can detect and skip / handle it.
     """
     try:
         tree = ast.parse(test_src)
@@ -232,13 +242,15 @@ def _first_assert_call(test_src, entry_point):
         if isinstance(test, ast.Compare) and len(test.ops) == 1 and \
            isinstance(test.ops[0], ast.Eq):
             left, right = test.left, test.comparators[0]
-            # left should be a call to candidate/entry_point
             if isinstance(left, ast.Call):
                 call_str = ast.unparse(left)
                 # normalize the callee name to the real entry_point
                 call_str = re.sub(r"^\s*candidate\b", entry_point, call_str)
-                expected_str = ast.unparse(right)
-                return call_str, expected_str
+                try:
+                    expected_value = ast.literal_eval(right)
+                except (ValueError, SyntaxError):
+                    expected_value = _NonLiteralExpected(ast.unparse(right))
+                return call_str, expected_value
     return None, None
 
 
@@ -279,6 +291,54 @@ def parse_output(response):
 
 
 # ---------------------------------------------------------------------------
+# Safe comparison helpers
+# ---------------------------------------------------------------------------
+
+def _coerce_predicted(predicted_str, expected_value):
+    """Parse model output into a Python value comparable to expected_value.
+
+    Strategy:
+      1. Try `ast.literal_eval` (handles numbers, strings, bools, None,
+         lists, tuples, dicts, sets of literals).
+      2. If that fails and the expected value is a string, treat the raw
+         output as a string (the model often omits quotes around plain
+         tokens like `010010` or `db0db`).
+      3. Otherwise return the raw stripped string so the caller still gets
+         a definite-but-mismatched value rather than a crash.
+
+    Never uses `eval` on model output.
+    """
+    if predicted_str is None:
+        return None
+    s = predicted_str.strip()
+    try:
+        return ast.literal_eval(s)
+    except (ValueError, SyntaxError):
+        pass
+    if isinstance(expected_value, str) and not isinstance(expected_value, _NonLiteralExpected):
+        # Strip any stray surrounding quotes the model may have added.
+        if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
+            return s[1:-1]
+        return s
+    return s
+
+
+def compare_predicted(predicted_str, expected_value):
+    """Return (ok, predicted_value_or_str, reason).
+
+    `reason` is one of: 'value', 'string', 'unresolved', 'no_output'.
+    """
+    if predicted_str is None:
+        return False, None, 'no_output'
+    if isinstance(expected_value, _NonLiteralExpected):
+        # Can't safely compare — RHS of the assert was an expression, not a
+        # literal. Fall back to a string-level match against its source.
+        return predicted_str.strip() == str(expected_value).strip(), predicted_str, 'unresolved'
+    predicted_value = _coerce_predicted(predicted_str, expected_value)
+    return predicted_value == expected_value, predicted_value, 'value'
+
+
+# ---------------------------------------------------------------------------
 # Example usage
 # ---------------------------------------------------------------------------
 
@@ -288,22 +348,33 @@ if __name__ == "__main__":
     problems = read_problems()
     correct = 0
     total = 0
+    skipped_nonliteral = 0
+
     for task_id, problem in problems.items():
         triple = humaneval_to_triple(problem)
         if triple is None:
             continue
         code, code_input, expected = triple
+
         prompt = create_prompt_deepseek(code, code_input,
                                         dataset="humaneval", pl="Python")
-        response = query_deepseek(prompt)         # temp=0.0 by default
+        response = query_deepseek(prompt)  # temp=0.0 by default
         predicted = parse_output(response)
-        # Compare by normalized literal; eval both sides for value equality.
-        try:
-            ok = eval(predicted) == eval(expected)
-        except Exception:
-            ok = (predicted == expected)
+
+        ok, predicted_value, reason = compare_predicted(predicted, expected)
+        if reason == 'unresolved':
+            skipped_nonliteral += 1
+
         correct += int(ok)
         total += 1
-        print(f"{task_id}: pred={predicted!r} exp={expected!r} {'OK' if ok else 'X'}")
+        flag = 'OK' if ok else 'X'
+        print(f"{task_id}: pred={predicted_value!r} exp={expected!r} "
+              f"[{reason}] {flag}")
 
-    print(f"\npass@1 (RIER) = {correct}/{total} = {correct/total:.4f}")
+    if total:
+        print(f"\npass@1 (RIER) = {correct}/{total} = {correct/total:.4f}")
+        if skipped_nonliteral:
+            print(f"(of which {skipped_nonliteral} had non-literal expected "
+                  f"values and were compared at string level)")
+    else:
+        print("No problems evaluated.")

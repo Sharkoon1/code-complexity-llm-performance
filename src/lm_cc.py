@@ -5,6 +5,7 @@ import time
 import tokenize
 import requests
 import torch
+import ast
 import torch.nn.functional as F
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from dataclasses import dataclass
@@ -61,7 +62,7 @@ def compute_lm_cc(code: str) -> dict:
     # 2. entropy
     features = compute_token_features(processed_code)
     # 3. semantic units
-    boundaries = _detect_boundaries(features.entropy)
+    boundaries = _detect_boundaries(processed_code, features.offsets, features.entropy)
     segments = _mask_to_segments(boundaries)
     # 4. semantic hierachy
     hierachy = _build_hierarchy(segments, features, processed_code, indent_levels)
@@ -92,7 +93,7 @@ def _preprocess_code(code: str) -> tuple[str, dict[int, int]]:
         if token_start_line not in indent_levels:
             indent_levels[token_start_line] = current_level
 
-        # filter commments and doc strings
+        # filter commments 
         if token_type in (tokenize.COMMENT, tokenize.TYPE_COMMENT):
             continue
 
@@ -203,12 +204,64 @@ def _mask_to_segments(boundaries: torch.Tensor) -> list:
     return segments
 
 
+def _build_line_offsets(code: str) -> list[int]:
+    offsets = [0]
+    for i, char in enumerate(code):
+        if char == "\n":
+            offsets.append(i + 1)
+    return offsets
+
+def _find_syntactic_boundaries(code: str) -> set[int]:
+    boundary_chars = set()
+    
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return boundary_chars
+    
+    line_offsets = _build_line_offsets(code)
+    
+    target_types = (
+        ast.If, ast.For, ast.While, ast.AsyncFor,
+        ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+        ast.Try, ast.With, ast.AsyncWith,
+    )
+    
+    for node in ast.walk(tree):
+        if isinstance(node, target_types):
+            if hasattr(node, 'end_lineno') and node.end_lineno is not None:
+                char_pos = line_offsets[node.end_lineno - 1] + node.end_col_offset
+                boundary_chars.add(char_pos)
+    
+    return boundary_chars
+
+def _syntactic_boundary_mask(
+    code: str,
+    offsets: torch.Tensor,
+) -> torch.Tensor:
+    boundary_chars = _find_syntactic_boundaries(code)
+    n_tokens = offsets.shape[0]
+    
+    if not boundary_chars:
+        return torch.zeros(n_tokens, dtype=torch.bool)
+    
+    boundary_tensor = torch.tensor(sorted(boundary_chars), dtype=offsets.dtype)
+    token_starts = offsets[:, 0].unsqueeze(1)  # (n_tokens, 1)
+    token_ends = offsets[:, 1].unsqueeze(1)    # (n_tokens, 1)
+    boundaries = boundary_tensor.unsqueeze(0)  # (1, n_boundaries)
+    
+    #  (n_tokens, n_boundaries)
+    in_range = (token_starts <= boundaries) & (boundaries <= token_ends)
+    
+    return in_range.any(dim=1)
+
 def _detect_boundaries(
-    entropy: torch.Tensor, tau_quantile: float = 0.67
+    code:str, offsets: torch.Tensor, entropy: torch.Tensor, tau_quantile: float = 0.67
 ) -> torch.Tensor:
     tau = torch.quantile(entropy.float(), tau_quantile)
-    is_boundary = entropy > tau
-    return is_boundary
+    entropy_boundary_mask = entropy > tau 
+    syntatic_boundary_mask = _syntactic_boundary_mask(code, offsets)
+    return entropy_boundary_mask | syntatic_boundary_mask
 
 
 def compute_token_features(code: str) -> TokenFeatures:
