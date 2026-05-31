@@ -1,9 +1,10 @@
 FROM runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04
-ARG REMOTE_MODEL=Qwen/Qwen2.5-Coder-7B
+
+ARG REMOTE_MODEL=meta-llama/CodeLlama-7b-hf
 ENV LM_CC_MODEL=${REMOTE_MODEL}
 ENV LM_CC_DEVICE=cuda
 ENV PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-ENV HF_HOME=/runpod-volume/.huggingface
+ENV HF_HOME=/runpod-volume/huggingface-cache
 
 WORKDIR /app
 
