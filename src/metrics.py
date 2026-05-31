@@ -14,11 +14,6 @@ from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
-@dataclass
-class MetricResult:
-    cyclomatic: float
-  
-
 def compute_metrics(filtered_dataset: pd.DataFrame) -> pd.DataFrame:
     metrics_list = []
 
