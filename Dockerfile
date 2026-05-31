@@ -1,5 +1,4 @@
-FROM runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
-
+FROM runpod/pytorch:2.8.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04
 ARG REMOTE_MODEL=Qwen/Qwen2.5-Coder-7B
 ENV LM_CC_MODEL=${REMOTE_MODEL}
 ENV LM_CC_DEVICE=cuda
