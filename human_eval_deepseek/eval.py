@@ -7,12 +7,18 @@ and the `$?$` quirk). The whole template is sent as a SINGLE user message,
 which is the closest faithful port of CodeMind's single-string prompt to the
 DeepSeek chat API.
 
-Did not write this myself, its an extension of the code mind create_prompt_gpt_codeqwen to validate the lm cc scores and compare it to the original paper lm cc scores.
+Extension of CodeMind's create_prompt_gpt_codeqwen to validate LM-CC scores
+against the original paper.
 """
 
-# ---------------------------------------------------------------------------
-# Shared prompt components (verbatim from CodeMind's create_prompt_ier.py)
-# ---------------------------------------------------------------------------
+import ast
+import os
+import re
+
+import pandas as pd
+from openai import OpenAI
+from tqdm import tqdm
+
 
 example_python_function = '''
 def sum_of_integer(N, A, B):
@@ -91,10 +97,6 @@ question_return_value = "What would be the return value of "
 instruction = """I want you to act as a {language} code executor. I will give you a piece of {language} code and its input. You need to think step by step and then print the output of code execution."""
 
 
-# ---------------------------------------------------------------------------
-# DeepSeek-V3 prompt builder (GPT/CodeQwen-style base, single string)
-# ---------------------------------------------------------------------------
-
 def create_prompt_deepseek(code, code_input, dataset, pl):
     """Build the IER prompt string for DeepSeek-V3.
 
@@ -118,16 +120,6 @@ def create_prompt_deepseek(code, code_input, dataset, pl):
     )
 
     prompt = template  # fallback
-
-    if pl == 'Java':
-        prompt_instruction = instruction.format(language='Java')
-        if dataset in ['CodeNet', 'Avatar']:
-            prompt = template.replace("$PROMPT_INSTRUCTION$", prompt_instruction) \
-                .replace("$EXAMPLE_CODE$", example_java) \
-                .replace("$QUESTION$", question_print_output) \
-                .replace("$EXAMPLE_INPUT$", example_input) \
-                .replace("$EXAMPLE_REASONING$", example_reasoning_java) \
-                .replace("$?$", '')
 
     if pl == 'Python':
         prompt_instruction = instruction.format(language='Python')
@@ -153,15 +145,6 @@ def create_prompt_deepseek(code, code_input, dataset, pl):
                 .replace("$EXAMPLE_REASONING$", example_reasoning_python_cruxeval) \
                 .replace("$?$", "?")
     return prompt
-
-
-# ---------------------------------------------------------------------------
-# HumanEval -> (code, code_input, expected_output) helper
-# ---------------------------------------------------------------------------
-
-import ast
-import re
-
 
 # Sentinel for expected values that couldn't be reduced to a Python literal
 # (e.g. `tuple(sort_third([1, 2, 3]))` on the RHS of an assert).
@@ -254,10 +237,6 @@ def _first_assert_call(test_src, entry_point):
     return None, None
 
 
-# ---------------------------------------------------------------------------
-# DeepSeek API call wrapper
-# ---------------------------------------------------------------------------
-
 def query_deepseek(prompt, model="deepseek-chat", temperature=0.0,
                    stop=("[END-OF-RESPONSE]",), max_tokens=2048):
     """Send the single-string prompt as one user message to DeepSeek.
@@ -266,9 +245,6 @@ def query_deepseek(prompt, model="deepseek-chat", temperature=0.0,
     verify the current alias against DeepSeek's docs before a final run.
     Temperature 0.0 matches CodeMind's determinism choice for non-GPT models.
     """
-    import os
-    from openai import OpenAI
-
     client = OpenAI(
         api_key=os.environ["DEEPSEEK_API_KEY"],
         base_url="https://api.deepseek.com",
@@ -289,10 +265,6 @@ def parse_output(response):
                   response, re.DOTALL)
     return m.group(1).strip() if m else None
 
-
-# ---------------------------------------------------------------------------
-# Safe comparison helpers
-# ---------------------------------------------------------------------------
 
 def _coerce_predicted(predicted_str, expected_value):
     """Parse model output into a Python value comparable to expected_value.
@@ -336,45 +308,3 @@ def compare_predicted(predicted_str, expected_value):
         return predicted_str.strip() == str(expected_value).strip(), predicted_str, 'unresolved'
     predicted_value = _coerce_predicted(predicted_str, expected_value)
     return predicted_value == expected_value, predicted_value, 'value'
-
-
-# ---------------------------------------------------------------------------
-# Example usage
-# ---------------------------------------------------------------------------
-
-if __name__ == "__main__":
-    from human_eval.data import read_problems  # pip install human-eval
-
-    problems = read_problems()
-    correct = 0
-    total = 0
-    skipped_nonliteral = 0
-
-    for task_id, problem in problems.items():
-        triple = humaneval_to_triple(problem)
-        if triple is None:
-            continue
-        code, code_input, expected = triple
-
-        prompt = create_prompt_deepseek(code, code_input,
-                                        dataset="humaneval", pl="Python")
-        response = query_deepseek(prompt)  # temp=0.0 by default
-        predicted = parse_output(response)
-
-        ok, predicted_value, reason = compare_predicted(predicted, expected)
-        if reason == 'unresolved':
-            skipped_nonliteral += 1
-
-        correct += int(ok)
-        total += 1
-        flag = 'OK' if ok else 'X'
-        print(f"{task_id}: pred={predicted_value!r} exp={expected!r} "
-              f"[{reason}] {flag}")
-
-    if total:
-        print(f"\npass@1 (RIER) = {correct}/{total} = {correct/total:.4f}")
-        if skipped_nonliteral:
-            print(f"(of which {skipped_nonliteral} had non-literal expected "
-                  f"values and were compared at string level)")
-    else:
-        print("No problems evaluated.")

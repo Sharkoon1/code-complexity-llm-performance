@@ -62,7 +62,6 @@ def make_nested(n: int) -> str:
     return "\n".join(lines)
 
 def lm_cc_of(code: str) -> float:
-    """Extract the final LM-CC score."""
     return compute_lm_cc(code)["lm_cc_score"]
 
 class TestPropositionB1:
@@ -222,7 +221,7 @@ class TestEdgeCases:
         assert result["lm_cc_max_comp"] >= 1
 
     def test_mixed_nesting_depth(self):
-        """Mixed nesting: def→for→try→if should reach depth ~4."""
+        """Mixed nesting: def,for,try,if should reach depth 4."""
         code = (
             "def process(items):\n"
             "    for item in items:\n"
@@ -238,7 +237,7 @@ class TestEdgeCases:
         )
 
     def test_multiple_functions_not_nested(self):
-        """Two top-level functions should NOT be nested into each other."""
+        """Two top-level functions should not be nested into each other."""
         code = (
             "def a():\n"
             "    if x:\n"
