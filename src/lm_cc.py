@@ -61,6 +61,15 @@ def compute_lm_cc(code: str) -> dict:
     processed_code, indent_levels = _preprocess_code(code)
     # 2. entropy
     features = compute_token_features(processed_code)
+
+    # Edge case: trivial code with no meaningful tokens
+    if features.entropy.numel() == 0:
+        empty_root = SemanticUnit(
+            char_start=0, char_end=len(processed_code),
+            depth=0, indent=-1, children=[],
+        )
+        return _aggregate(empty_root)
+    
     # 3. semantic units
     boundaries = _detect_boundaries(processed_code, features.offsets, features.entropy)
     segments = _mask_to_segments(boundaries)
@@ -258,6 +267,9 @@ def _syntactic_boundary_mask(
 def _detect_boundaries(
     code:str, offsets: torch.Tensor, entropy: torch.Tensor, tau_quantile: float = 0.67
 ) -> torch.Tensor:
+    if entropy.numel() == 0:
+        return torch.zeros(0, dtype=torch.bool)
+    
     tau = torch.quantile(entropy.float(), tau_quantile)
     entropy_boundary_mask = entropy > tau 
     syntatic_boundary_mask = _syntactic_boundary_mask(code, offsets)

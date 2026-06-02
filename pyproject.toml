@@ -13,6 +13,7 @@ dependencies = [
     "openai>=2.38.0",
     "pandas>=3.0.3",
     "pingouin>=0.6.1",
+    "python-dotenv>=1.2.2",
     "radon>=6.0.1",
     "scipy>=1.17.1",
     "seaborn>=0.13.2",
@@ -29,5 +30,10 @@ dependencies = [
 dev = [
     "ipykernel>=6.29",
     "jupyter>=1.0",
+    "pytest>=9.0.3",
     "pyzmq>=26",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
