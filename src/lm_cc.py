@@ -32,12 +32,16 @@ def _load():
     if _model is not None:
         return
     model_name = os.environ.get("LM_CC_MODEL", "Qwen/Qwen2.5-Coder-0.5B")
-    _tokenizer = AutoTokenizer.from_pretrained(model_name)
-    _model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        torch_dtype=torch.float16,
-    ).to(_get_device())
-    _model.eval()
+    try:
+        _tokenizer = AutoTokenizer.from_pretrained(model_name)
+        _model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            torch_dtype=torch.float16,
+        ).to(_get_device())
+        _model.eval()
+    except Exception as e:
+        logger.error(f"Error loading model {model_name}: {e}")
+        raise
 
 
 @dataclass

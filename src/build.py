@@ -5,8 +5,16 @@ from src.config import PATHS
 logger = logging.getLogger(__name__)
 
 def build_labeled_dataset() -> pd.DataFrame:
-    tasks = pd.read_parquet(PATHS.SWEBENCH_TASKS)
-    labels = pd.read_parquet(PATHS.AGENTLESS_LABELS)
+    try:
+        tasks = pd.read_parquet(PATHS.SWEBENCH_TASKS)
+    except OSError as e:
+        logger.error(f"Error reading {PATHS.SWEBENCH_TASKS}: {e}")
+        raise
+    try:
+        labels = pd.read_parquet(PATHS.AGENTLESS_LABELS)
+    except OSError as e:
+        logger.error(f"Error reading {PATHS.AGENTLESS_LABELS}: {e}")
+        raise
 
     df = tasks.merge(labels, on="instance_id", how="left")
 
@@ -21,7 +29,7 @@ def build_labeled_dataset() -> pd.DataFrame:
     df["status"] = df["status"].fillna("unresolved")
     df["resolved"] = df["resolved"].fillna(False).astype(bool)
 
-    logger.info(f"{n_missing} Tasks without explicit labeel -> mark as 'unresolved'")
+    logger.info(f"{n_missing} Tasks without explicit label -> mark as 'unresolved'")
     logger.info(f"Status distribution:\n{df['status'].value_counts().to_string()}")
     logger.info(f"Resolve rate: {df['resolved'].mean():.1%}")
 

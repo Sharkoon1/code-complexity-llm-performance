@@ -19,11 +19,15 @@ def compute_metrics(filtered_dataset: pd.DataFrame) -> pd.DataFrame:
 
     for _, row in tqdm(filtered_dataset.iterrows(), total=len(filtered_dataset)):
         cache = cache_path(row["repo"], row["base_commit"], row["python_files"][0])
-        raw_code = cache.read_text()
+        try:
+            raw_code = cache.read_text()
+        except OSError as e:
+            logger.error(f"Error reading cache for {row['instance_id']}: {e}")
+            raise
         code = _normalize_code(raw_code)
 
         metrics = {"instance_id": row["instance_id"]}
-        
+
         try:
             metrics.update({
                 "parsable": True,
@@ -37,6 +41,7 @@ def compute_metrics(filtered_dataset: pd.DataFrame) -> pd.DataFrame:
                 **compute_lm_cc(code),
             })
         except Exception as e:
+            logger.error(f"Error computing metrics for {row['instance_id']}: {e}")
             metrics["parsable"] = False
             metrics["error"] = f"{type(e).__name__}: {e}"
         

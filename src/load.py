@@ -9,11 +9,15 @@ from src.shared import cache_path
 logger = logging.getLogger(__name__)
 
 def load_swe_bench() -> pd.DataFrame:
-    ds = load_dataset(
-        "princeton-nlp/SWE-bench_Verified",
-        split="test",
-        revision=PATHS.REVISION,
-    )
+    try:
+        ds = load_dataset(
+            "princeton-nlp/SWE-bench_Verified",
+            split="test",
+            revision=PATHS.REVISION,
+        )
+    except Exception as e:
+        logger.error(f"Error fetching SWE-bench_Verified dataset: {e}")
+        raise
     return ds.to_pandas()
 
 
@@ -25,9 +29,13 @@ def fetch_model_bench_predictions(predicition_set: str) -> pd.DataFrame:
         "results/results.json"
     )
 
-    response = requests.get(url, timeout=30)
-    response.raise_for_status()
-    results = response.json()
+    try:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        results = response.json()
+    except requests.RequestException as e:
+        logger.error(f"Error fetching predictions for {predicition_set}: {e}")
+        raise
 
     resolved = set(results.get("resolved", []))
     no_generation = set(results.get("no_generation", []))
@@ -56,8 +64,12 @@ def fetch_model_bench_predictions(predicition_set: str) -> pd.DataFrame:
 
 def _fetch_github_pre_patch_file(repo: str, base_commit: str, file_path: str) -> str:
     url = f"https://raw.githubusercontent.com/{repo}/{base_commit}/{file_path}"
-    response = requests.get(url, timeout=30)
-    response.raise_for_status()
+    try:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        logger.error(f"Error fetching {file_path} from {repo}@{base_commit}: {e}")
+        raise
     return response.text
 
 
@@ -74,7 +86,7 @@ def fetch_all_pre_patch_files(labeled_dataset: pd.DataFrame) -> None:
                 file_path=row["python_files"][0],
             )
         except requests.RequestException as e:
-            logger.warning(f"Error on {row['instance_id']}: {e}")
+            logger.error(f"Error fetching {row['instance_id']}: {e}")
             continue
         
         cache.parent.mkdir(parents=True, exist_ok=True)

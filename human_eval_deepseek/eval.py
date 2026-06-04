@@ -186,7 +186,7 @@ def _strip_comments_and_docstrings(src):
     try:
         tree = ast.parse(src)
     except SyntaxError:
-        return src  # leave as-is if it won't parse
+        return src  
 
     # Drop docstrings (first stmt that is a bare string) from module/func/class.
     for node in ast.walk(tree):
@@ -201,7 +201,7 @@ def _strip_comments_and_docstrings(src):
         out = ast.unparse(tree)  # Python 3.9+
     except Exception:
         out = src
-    # ast.unparse already drops # comments. Tidy stray blank lines.
+    # ast.unparse already drops # comments
     return re.sub(r"\n\s*\n\s*\n", "\n\n", out).strip()
 
 
@@ -303,8 +303,6 @@ def compare_predicted(predicted_str, expected_value):
     if predicted_str is None:
         return False, None, 'no_output'
     if isinstance(expected_value, _NonLiteralExpected):
-        # Can't safely compare — RHS of the assert was an expression, not a
-        # literal. Fall back to a string-level match against its source.
         return predicted_str.strip() == str(expected_value).strip(), predicted_str, 'unresolved'
     predicted_value = _coerce_predicted(predicted_str, expected_value)
     return predicted_value == expected_value, predicted_value, 'value'
