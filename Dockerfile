@@ -5,7 +5,6 @@ ENV LM_CC_MODEL=${REMOTE_MODEL}
 ENV LM_CC_DEVICE=cuda
 ENV PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 ENV HF_HOME=/runpod-volume/huggingface-cache
-ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
