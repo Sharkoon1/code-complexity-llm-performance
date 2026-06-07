@@ -12,6 +12,8 @@ They validate the structural correctness of the LM-CC computation,
 independently of the evaluation model.
 """
 
+import ast
+
 import numpy as np
 import pytest
 import torch
@@ -310,6 +312,19 @@ class TestPreprocessing:
         with_doc = 'def f(n):\n    """Return n doubled."""\n    return n * 2\n'
         without_doc = "def f(n):\n    return n * 2\n"
         assert lm_cc_of(with_doc) == pytest.approx(lm_cc_of(without_doc))
+
+    @pytest.mark.parametrize("code", [
+        'class Empty:\n    """Only a docstring."""\n',          # sole docstring, class
+        'def stub():\n    """Only a docstring."""\n',           # sole docstring, function
+        'class A:\n    def m(self):\n        """only doc"""\n    x = 1\n',  # nested method
+    ])
+    def test_sole_docstring_stays_valid(self, code):
+        """Removing a docstring must never leave an empty (invalid) body."""
+        ast.parse(_preprocess_code(code))  # raises SyntaxError if a body was emptied
+
+    def test_sole_docstring_does_not_crash_compute(self):
+        result = compute_lm_cc('class Empty:\n    """Only a docstring."""\n')
+        assert "lm_cc_score" in result
 
 
 class TestEmptySegmentBug:

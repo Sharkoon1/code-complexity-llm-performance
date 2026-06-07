@@ -63,7 +63,11 @@ def _normalize_code(code:str) -> str:
                     and isinstance(node.body[0].value, ast.Constant)
                     and isinstance(node.body[0].value.value, str)):
                 node.body.pop(0)
-    return ast.unparse(tree)    
+                # a function/class whose only statement was the docstring would
+                # otherwise be left with an empty (invalid) body -> keep a `pass`
+                if not node.body and not isinstance(node, ast.Module):
+                    node.body.append(ast.Pass())
+    return ast.unparse(ast.fix_missing_locations(tree))
 
 def _compute_cyclomatic(code: str) -> dict:
     results = cc_visit(code)
