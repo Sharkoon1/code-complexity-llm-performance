@@ -33,14 +33,13 @@ def _load():
         return
 
     model_name = os.environ.get("LM_CC_MODEL", "Qwen/Qwen2.5-Coder-0.5B")
-    device = _get_device()
-    logger.info("Loading LM-CC entropy model '%s' on device '%s'.", model_name, device)
+
     try:
         _tokenizer = AutoTokenizer.from_pretrained(model_name)
         _model = AutoModelForCausalLM.from_pretrained(
             model_name,
             torch_dtype=torch.float16,
-        ).to(device)
+        ).to(_get_device())
         _model.eval()
     except Exception as e:
         logger.error(f"Error loading model {model_name}: {e}")
