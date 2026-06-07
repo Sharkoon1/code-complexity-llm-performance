@@ -14,8 +14,16 @@ independently of the evaluation model.
 
 import numpy as np
 import pytest
+import torch
 
-from src.lm_cc import compute_lm_cc
+from src.lm_cc import (
+    compute_lm_cc,
+    _preprocess_code,
+    _mask_to_segments,
+    _build_hierarchy,
+    _aggregate,
+    TokenFeatures,
+)
 
 def make_flat(n: int) -> str:
     """n sequential, independent conditionals (all at level 1).
@@ -259,3 +267,81 @@ class TestEdgeCases:
         code = "if x:\n        y = 1"  # 8-space indent
         result = compute_lm_cc(code)
         assert "lm_cc_score" in result
+
+
+def _flat_segments_features(n: int):
+    """n single-token top-level segments at indent 0 (model-free fixture)."""
+    processed = "".join(f"s{i} = {i}\n" for i in range(n))
+    offsets, pos = [], 0
+    for i in range(n):
+        offsets.append([pos, pos + 1])          # token at the start of its line
+        pos += len(f"s{i} = {i}\n")
+    feats = TokenFeatures(
+        tokens=torch.zeros(n, dtype=torch.long),
+        entropy=torch.zeros(n),
+        offsets=torch.tensor(offsets),
+    )
+    return processed, feats, [(i, i + 1) for i in range(n)]
+
+
+class TestPreprocessing:
+    """Paper §3.2(1) / Algorithm 1 L1: preprocessing removes comments AND docstrings."""
+
+    def test_docstring_prose_removed(self):
+        code = 'def f(x):\n    """A docstring with prose."""\n    return x + 1\n'
+        processed = _preprocess_code(code)
+        assert "docstring" not in processed.lower()
+        assert "prose" not in processed.lower()
+
+    def test_docstring_yields_same_processed_code(self):
+        """With- and without-docstring sources must normalize to identical code."""
+        with_doc = 'def f():\n    """doc"""\n    return 1\n'
+        without_doc = 'def f():\n    return 1\n'
+        assert _preprocess_code(with_doc) == _preprocess_code(without_doc)
+
+    def test_comments_and_continuation_placeholders_removed(self):
+        code = "x = 1  # inline\n\n# full line\ny = 2\n"
+        processed = _preprocess_code(code)
+        assert "#" not in processed
+        assert "\\" not in processed  # no bare line-continuation placeholders
+
+    def test_docstring_does_not_change_score(self):
+        """End-to-end (uses the model): identical processed code -> identical score."""
+        with_doc = 'def f(n):\n    """Return n doubled."""\n    return n * 2\n'
+        without_doc = "def f(n):\n    return n * 2\n"
+        assert lm_cc_of(with_doc) == pytest.approx(lm_cc_of(without_doc))
+
+
+class TestEmptySegmentBug:
+    """Regression: a leading boundary must not create an empty / whole-file unit."""
+
+    def test_mask_to_segments_no_empty_leading_segment(self):
+        segs = _mask_to_segments(torch.tensor([True, False, True, False]))
+        assert all(end > start for start, end in segs)
+        assert segs[0][0] == 0
+
+    def test_build_hierarchy_skips_degenerate_segment(self):
+        processed, feats, segments = _flat_segments_features(3)
+
+        root = _build_hierarchy([(0, 0)] + segments, feats, processed)
+        assert len(root.children) == 3
+        assert not any(
+            c.char_start == 0 and c.char_end == len(processed) for c in root.children
+        )
+
+
+class TestRootBranching:
+    """Paper Eq. 4 / Algorithm 1 L16: the sum includes the top unit r, so
+    top-level (horizontal) branching is counted in TotalBranch."""
+
+    def _total_branch(self, n: int) -> int:
+        processed, feats, segments = _flat_segments_features(n)
+        return _aggregate(_build_hierarchy(segments, feats, processed))["lm_cc_total_branch"]
+
+    def test_top_level_branching_counted(self):
+        # b(root) = number of top-level units must appear in TotalBranch.
+        assert self._total_branch(3) == 3
+        assert self._total_branch(5) == 5
+
+    def test_total_branch_grows_with_top_level_width(self):
+        assert self._total_branch(6) > self._total_branch(2)
