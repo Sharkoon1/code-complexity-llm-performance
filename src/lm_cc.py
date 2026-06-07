@@ -1,9 +1,7 @@
 import io
 import logging
 import os
-import time
 import tokenize
-import requests
 import torch
 import ast
 import torch.nn.functional as F
@@ -321,14 +319,8 @@ def _detect_boundaries(
     return entropy_boundary_mask | syntatic_boundary_mask
 
 
-def compute_token_features(code: str) -> TokenFeatures:
-    if os.environ.get("LOCAL_LM_CC", "true").lower() == "true":
-        return _compute_token_features_local(code)
-    return _compute_token_features_remote(code)
-
-
 @torch.no_grad()
-def _compute_token_features_local(code: str) -> TokenFeatures:
+def compute_token_features(code: str) -> TokenFeatures:
     _load()
     inputs = _tokenizer(code, return_tensors="pt", return_offsets_mapping=True)
     offsets = inputs.pop("offset_mapping")
@@ -354,82 +346,3 @@ def _compute_token_features_local(code: str) -> TokenFeatures:
         entropy=entropy[0, :-1].cpu(),
         offsets=offsets[0, 1:],
     )
-
-
-def _compute_token_features_remote(code: str) -> TokenFeatures:
-    endpoint_url = os.environ.get("LM_CC_REMOTE_URL")
-    api_key = os.environ.get("LM_CC_REMOTE_KEY")
-    if not endpoint_url or not api_key:
-        raise RuntimeError("LM_CC_REMOTE_URL and LM_CC_REMOTE_KEY missing.")
-
-    timeout_seconds = float(os.environ.get("LM_CC_REMOTE_TIMEOUT", "600"))
-    headers = {"Authorization": f"Bearer {api_key}"}
-
-    try:
-        response = requests.post(
-            endpoint_url,
-            json={"input": {"code": code}},
-            headers=headers,
-            timeout=timeout_seconds,
-        )
-        response.raise_for_status()
-        response_body = response.json()
-    except requests.RequestException as exc:
-        logger.error("Remote inference failed.")
-        raise RuntimeError(f"Remote inference request failed: {exc}.") from exc
-    except ValueError as exc:
-        logger.error("Remote returned unparsable json body: %s.", response.text[:500])
-        raise RuntimeError("Remote returned unparsable json body.") from exc
-
-    status = response_body.get("status")
-    if status in ("IN_QUEUE", "IN_PROGRESS"):
-        job_id = response_body.get("id")
-        if not job_id:
-            raise RuntimeError(f"Response has status {status} but no job id.")
-        response_body = _poll_until_complete(
-            endpoint_url, job_id, headers, timeout_seconds
-        )
-    elif status in ("FAILED", "CANCELLED", "TIMED_OUT"):
-        raise RuntimeError(f"Remote job ended with status {status}: {response_body}.")
-
-    output = response_body.get("output")
-    if not output or not all(
-        field in output for field in ("tokens", "entropy", "offsets")
-    ):
-        logger.error("Response missing expected fields: %s.", response_body)
-        raise RuntimeError("Response missing tokens/entropy/offsets.")
-
-    return TokenFeatures(
-        tokens=torch.tensor(output["tokens"], dtype=torch.int64),
-        entropy=torch.tensor(output["entropy"], dtype=torch.float32),
-        offsets=torch.tensor(output["offsets"], dtype=torch.int64),
-    )
-
-
-def _poll_until_complete(
-    endpoint_url: str, job_id: str, headers: dict, timeout_seconds: float
-) -> dict:
-    base, _, _ = endpoint_url.rpartition("/")
-    status_url = f"{base}/status/{job_id}"
-
-    deadline = time.monotonic() + timeout_seconds
-    while True:
-        if time.monotonic() > deadline:
-            raise RuntimeError(
-                f"Remote job {job_id} did not complete in {timeout_seconds}s."
-            )
-        try:
-            response = requests.get(status_url, headers=headers, timeout=30)
-            response.raise_for_status()
-            body = response.json()
-        except (requests.RequestException, ValueError) as exc:
-            raise RuntimeError(f"Polling job {job_id} failed: {exc}.") from exc
-
-        status = body.get("status")
-        if status == "COMPLETED":
-            return body
-        if status in ("FAILED", "CANCELLED", "TIMED_OUT"):
-            raise RuntimeError(
-                f"Remote job {job_id} ended with status {status}: {body}."
-            )
-        time.sleep(1.0)
