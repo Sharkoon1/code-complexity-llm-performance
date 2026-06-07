@@ -31,13 +31,16 @@ def _load():
     global _tokenizer, _model
     if _model is not None:
         return
+
     model_name = os.environ.get("LM_CC_MODEL", "Qwen/Qwen2.5-Coder-0.5B")
+    device = _get_device()
+    logger.info("Loading LM-CC entropy model '%s' on device '%s'.", model_name, device)
     try:
         _tokenizer = AutoTokenizer.from_pretrained(model_name)
         _model = AutoModelForCausalLM.from_pretrained(
             model_name,
             torch_dtype=torch.float16,
-        ).to(_get_device())
+        ).to(device)
         _model.eval()
     except Exception as e:
         logger.error(f"Error loading model {model_name}: {e}")
@@ -49,7 +52,7 @@ class SemanticUnit:
     char_start: int  #  from segment (horizontal info)
     char_end: int  #  from segment (horizontal info)
     depth: int  #  from hierarchy (vertical info)
-    indent: int  #  from source (raw indentation level)
+    indent: int  #  leading-whitespace width of the unit's first line (root = -1)
     children: list[...]  #  from hierarchy (vertical info)
 
 
@@ -62,7 +65,7 @@ class TokenFeatures:
 
 def compute_lm_cc(code: str) -> dict:
     # 1. normalize
-    processed_code, indent_levels = _preprocess_code(code)
+    processed_code = _preprocess_code(code)
     # 2. entropy
     features = compute_token_features(processed_code)
 
@@ -73,41 +76,55 @@ def compute_lm_cc(code: str) -> dict:
             depth=0, indent=-1, children=[],
         )
         return _aggregate(empty_root)
-    
+
     # 3. semantic units
     boundaries = _detect_boundaries(processed_code, features.offsets, features.entropy)
     segments = _mask_to_segments(boundaries)
     # 4. semantic hierachy
-    hierachy = _build_hierarchy(segments, features, processed_code, indent_levels)
+    hierachy = _build_hierarchy(segments, features, processed_code)
 
     return _aggregate(hierachy)
 
 
-def _preprocess_code(code: str) -> tuple[str, dict[int, int]]:
+def _docstring_token_starts(code: str) -> set[tuple[int, int]]:
+    starts: set[tuple[int, int]] = set()
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return starts
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.FunctionDef,
+                             ast.AsyncFunctionDef, ast.ClassDef)):
+            body = node.body
+            if (body
+                    and isinstance(body[0], ast.Expr)
+                    and isinstance(body[0].value, ast.Constant)
+                    and isinstance(body[0].value.value, str)):
+                doc = body[0].value
+                starts.add((doc.lineno, doc.col_offset))
+    return starts
+
+
+def _preprocess_code(code: str) -> str:
+    docstring_starts = _docstring_token_starts(code)
+
     io_object = io.StringIO(code)
     kept_tokens = []
     last_appended_line = -1
-    indent_levels = {}
-    current_level = 0
 
     for token in tokenize.generate_tokens(io_object.readline):
         token_type = token.type
         token_start_line, _ = token.start
 
-        # track nesting via INDENT/DEDENT
-        if token_type == tokenize.INDENT:
-            current_level += 1
-            continue
-        if token_type == tokenize.DEDENT:
-            current_level -= 1
+        if token_type in (tokenize.INDENT, tokenize.DEDENT):
             continue
 
-        # record indent for this line
-        if token_start_line not in indent_levels:
-            indent_levels[token_start_line] = current_level
-
-        # filter commments 
+        # filter comments
         if token_type in (tokenize.COMMENT, tokenize.TYPE_COMMENT):
+            continue
+
+        # filter docstrings 
+        if token_type == tokenize.STRING and token.start in docstring_starts:
             continue
 
         # filter blank lines
@@ -118,23 +135,27 @@ def _preprocess_code(code: str) -> tuple[str, dict[int, int]]:
         kept_tokens.append(token)
         last_appended_line = token_start_line
 
-    return tokenize.untokenize(kept_tokens), indent_levels
+    text = tokenize.untokenize(kept_tokens)
+    # untokenize leaves a "\" line-continuation placeholder wherever a token
+    # was removed
+    lines = [ln for ln in text.splitlines(keepends=True) if ln.strip() != "\\"]
+    return "".join(lines)
 
 
 def _aggregate(root: SemanticUnit, alpha: float = 0.8) -> dict:
-    depths = []
-    branches = []
+    comp_levels = []      # d(v) for real units (depth >= 1)
+    branch_factors = []   # b(v) for every unit incl. root
 
     def walk(node):
-        if node.depth > 0:  # skip root
-            depths.append(node.depth)
-            branches.append(len(node.children))
+        branch_factors.append(len(node.children))
+        if node.depth > 0:
+            comp_levels.append(node.depth)
         for child in node.children:
             walk(child)
 
     walk(root)
 
-    if not depths:
+    if not comp_levels:
         return {
             "lm_cc_score": 0.0,
             "lm_cc_max_comp": 0,
@@ -145,26 +166,38 @@ def _aggregate(root: SemanticUnit, alpha: float = 0.8) -> dict:
             "lm_cc_total_branch": 0,
         }
 
-    total_comp = sum(depths)
-    total_branch = sum(branches)
+    total_comp = sum(comp_levels)
+    total_branch = sum(branch_factors)
     score = alpha * total_branch + (1 - alpha) * total_comp
 
     return {
         "lm_cc_score": score,
-        "lm_cc_max_comp": max(depths),
-        "lm_cc_avg_comp": total_comp / len(depths),
+        "lm_cc_max_comp": max(comp_levels),
+        "lm_cc_avg_comp": total_comp / len(comp_levels),
         "lm_cc_total_comp": total_comp,
-        "lm_cc_max_branch": max(branches),
-        "lm_cc_avg_branch": total_branch / len(branches),
+        "lm_cc_max_branch": max(branch_factors),
+        "lm_cc_avg_branch": total_branch / len(branch_factors),
         "lm_cc_total_branch": total_branch,
     }
+
+
+def _line_indent(code: str, char_pos: int) -> int:
+    line_start = code.rfind("\n", 0, char_pos) + 1
+    indent = 0
+    for ch in code[line_start:]:
+        if ch == " ":
+            indent += 1
+        elif ch == "\t":
+            indent += 8
+        else:
+            break
+    return indent
 
 
 def _build_hierarchy(
     segments: list[tuple[int, int]],
     features: TokenFeatures,
     processed_code: str,
-    indent_levels: dict[int, int],
 ) -> SemanticUnit:
     root = SemanticUnit(
         char_start=0,
@@ -176,13 +209,16 @@ def _build_hierarchy(
     stack = [root]
 
     for tok_start, tok_end in segments:
+        # skip empty segments
+        if tok_end <= tok_start:
+            continue
+
         # char position
         char_start = features.offsets[tok_start, 0].item()
         char_end = features.offsets[tok_end - 1, 1].item()
 
-        # line number
-        line_number = processed_code[:char_start].count("\n") + 1
-        level = indent_levels.get(line_number, 0)
+        # raw indentation of the line this unit starts on
+        level = _line_indent(processed_code, char_start)
 
         # find parent on stack
         while stack[-1].indent >= level:
@@ -207,7 +243,9 @@ def _mask_to_segments(boundaries: torch.Tensor) -> list:
     segments = []
     segment_start = 0
     for i, boundary in enumerate(boundaries.tolist()):
-        if boundary:
+        # i > segment_start avoids an empty segment when the first
+        # token itself is a boundary (boundaries[0] is True).
+        if boundary and i > segment_start:
             segments.append((segment_start, i))  # (start, end)
             segment_start = i
     segments.append(
@@ -230,8 +268,12 @@ def _find_syntactic_boundaries(code: str) -> set[int]:
     try:
         tree = ast.parse(code)
     except SyntaxError:
+        logger.warning(
+            "Syntactic boundary detection skipped: processed code did not parse; "
+            "falling back to entropy-only segmentation."
+        )
         return boundary_chars
-    
+
     line_offsets = _build_line_offsets(code)
     
     target_types = (
@@ -264,8 +306,8 @@ def _syntactic_boundary_mask(
     boundaries = boundary_tensor.unsqueeze(0)  # (1, n_boundaries)
     
     #  (n_tokens, n_boundaries)
-    in_range = (token_starts <= boundaries) & (boundaries <= token_ends)
-    
+    in_range = (token_starts <= boundaries) & (boundaries < token_ends)
+
     return in_range.any(dim=1)
 
 def _detect_boundaries(
