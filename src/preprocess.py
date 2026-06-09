@@ -1,9 +1,9 @@
 """Source-code normalization shared by all complexity metrics.
 """
 
+import ast
 import logging
 import os
-import re
 import subprocess
 import tempfile
 import uuid
@@ -13,33 +13,24 @@ logger = logging.getLogger(__name__)
 
 
 def _remove_comments_and_docstrings(code: str) -> str:
-    string_placeholders = []
-    string_pattern = r'''(
-        \"\"\" (?:\\. | "(?!\"\"") | [^\\"])*? \"\"\" |
-        \''' (?:\\. | '(?!'') | [^\\'])*? \'''     |
-        " (?: \\. | [^"\\] )* "                    |
-        ' (?: \\. | [^'\\] )* '
-    )'''
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return code  # leave un-parseable code to black (which will skip it)
 
-    def replace_string(match):
-        string_placeholders.append(match.group(1))
-        return f'__STRING_{len(string_placeholders)-1}__'
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.FunctionDef,
+                             ast.AsyncFunctionDef, ast.ClassDef)):
+            body = node.body
+            if (body
+                    and isinstance(body[0], ast.Expr)
+                    and isinstance(body[0].value, ast.Constant)
+                    and isinstance(body[0].value.value, str)):
+                body.pop(0)
+                if not body and not isinstance(node, ast.Module):
+                    body.append(ast.Pass())
 
-    code = re.sub(string_pattern, replace_string, code, flags=re.DOTALL | re.VERBOSE)
-    code = re.sub(r'#.*', '', code)
-    for idx, content in enumerate(string_placeholders):
-        code = code.replace(f'__STRING_{idx}__', content)
-
-    code = re.sub(r'^(?:\s*)(["\']{3}.*?["\']{3})(?:\s*)$', '', code, flags=re.DOTALL | re.MULTILINE)
-    patterns = [
-        r'(def\s+\w+\(.*?\):\s*?\n)(\s*["\']{3}.*?["\']{3}\n)',
-        r'(class\s+\w+.*?:\s*?\n)(\s*["\']{3}.*?["\']{3}\n)',
-        r'(async\s+def\s+\w+\(.*?\):\s*?\n)(\s*["\']{3}.*?["\']{3}\n)'
-    ]
-    for pattern in patterns:
-        code = re.sub(pattern, r'\1', code, flags=re.DOTALL)
-    lines = [line for line in code.splitlines() if line.strip()]
-    return '\n'.join(lines)
+    return ast.unparse(ast.fix_missing_locations(tree))
 
 
 def _format_python_code(code: str):
