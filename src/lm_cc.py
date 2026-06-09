@@ -68,11 +68,15 @@ def compute_lm_cc(code: str) -> dict:
 
     # Edge case: trivial code with no meaningful tokens
     if features.entropy.numel() == 0:
-        empty_root = SemanticUnit(
-            char_start=0, char_end=len(processed_code),
-            depth=0, indent=-1, children=[],
-        )
-        return _aggregate(empty_root)
+        return {
+            "lm_cc_score": 0.0,
+            "lm_cc_max_comp": 0,
+            "lm_cc_avg_comp": 0.0,
+            "lm_cc_total_comp": 0,
+            "lm_cc_max_branch": 0,
+            "lm_cc_avg_branch": 0.0,
+            "lm_cc_total_branch": 0,
+        }
 
     # 3. semantic units
     boundaries = _detect_boundaries(processed_code, features.offsets, features.entropy)
@@ -144,28 +148,16 @@ def _preprocess_code(code: str) -> str:
 
 
 def _aggregate(root: SemanticUnit, alpha: float = 0.8) -> dict:
-    comp_levels = []      # d(v) for real units (depth >= 1)
-    branch_factors = []   # b(v) for every unit incl. root
+    comp_levels = []      # d(v)+1 for every unit including root  
+    branch_factors = []   # b(v) for every unit including root    
 
     def walk(node):
         branch_factors.append(len(node.children))
-        if node.depth > 0:
-            comp_levels.append(node.depth)
+        comp_levels.append(node.depth + 1)
         for child in node.children:
             walk(child)
 
     walk(root)
-
-    if not comp_levels:
-        return {
-            "lm_cc_score": 0.0,
-            "lm_cc_max_comp": 0,
-            "lm_cc_avg_comp": 0.0,
-            "lm_cc_total_comp": 0,
-            "lm_cc_max_branch": 0,
-            "lm_cc_avg_branch": 0.0,
-            "lm_cc_total_branch": 0,
-        }
 
     total_comp = sum(comp_levels)
     total_branch = sum(branch_factors)
@@ -312,13 +304,14 @@ def _syntactic_boundary_mask(
     return in_range.any(dim=1)
 
 def _detect_boundaries(
-    code:str, offsets: torch.Tensor, entropy: torch.Tensor, tau_quantile: float = 0.67
+    code:str, offsets: torch.Tensor, entropy: torch.Tensor, threshold: float = 0.67
 ) -> torch.Tensor:
     if entropy.numel() == 0:
         return torch.zeros(0, dtype=torch.bool)
-    
-    tau = torch.quantile(entropy.float(), tau_quantile)
-    entropy_boundary_mask = entropy > tau 
+
+    entropy_boundary_mask = entropy >= threshold
+    # skip first token like in the reference
+    entropy_boundary_mask[0] = False
     syntatic_boundary_mask = _syntactic_boundary_mask(code, offsets)
     return entropy_boundary_mask | syntatic_boundary_mask
 
