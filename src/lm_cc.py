@@ -1,14 +1,29 @@
-import io
+"""LM-CC: model-perceived code complexity (Xie et al., arXiv:2602.07882).
+
+This module owns the two LM-CC-specific concerns:
+  - token entropy from a code language model (`_compute_token_features`), and
+  - the LM-CC features computed over the semantic block tree (`_get_lmcc`, ...).
+
+`compute_lm_cc(code)` orchestrates:
+entropy -> block tree (`src.block_tree`) -> features. It expects already normalized
+code. The shared preprocessing lives in `src.preprocess` and
+is applied once upstream (see `src.metrics`).
+"""
+
 import logging
 import os
-import tokenize
-import torch
-import ast
-import torch.nn.functional as F
-from transformers import AutoTokenizer, AutoModelForCausalLM
+from collections import defaultdict
 from dataclasses import dataclass
 
+import torch
+import torch.nn.functional as F
+from transformers import AutoTokenizer, AutoModelForCausalLM
+
+from src.block_tree import CodeBlockProcessor, get_code_with_boundaries
+
 logger = logging.getLogger(__name__)
+
+_THRESHOLD = 0.67
 
 _tokenizer = None
 _model = None
@@ -45,301 +60,166 @@ def _load():
 
 
 @dataclass
-class SemanticUnit:
-    char_start: int  #  from segment (horizontal info)
-    char_end: int  #  from segment (horizontal info)
-    depth: int  #  from hierarchy (vertical info)
-    indent: int  #  leading-whitespace width of the unit's first line (root = -1)
-    children: list[...]  #  from hierarchy (vertical info)
-
-
-@dataclass
 class TokenFeatures:
-    tokens: torch.Tensor  # (n-1,) token IDs
-    entropy: torch.Tensor  # (n-1,) per-token entropy
-    offsets: torch.Tensor  # (n-1, 2) char spans in source
-
-
-def compute_lm_cc(code: str) -> dict:
-    # 1. normalize
-    processed_code = _preprocess_code(code)
-    # 2. entropy
-    features = compute_token_features(processed_code)
-
-    # Edge case: trivial code with no meaningful tokens
-    if features.entropy.numel() == 0:
-        return {
-            "lm_cc_score": 0.0,
-            "lm_cc_max_comp": 0,
-            "lm_cc_avg_comp": 0.0,
-            "lm_cc_total_comp": 0,
-            "lm_cc_max_branch": 0,
-            "lm_cc_avg_branch": 0.0,
-            "lm_cc_total_branch": 0,
-        }
-
-    # 3. semantic units
-    boundaries = _detect_boundaries(processed_code, features.offsets, features.entropy)
-    segments = _mask_to_segments(boundaries)
-    # 4. semantic hierachy
-    hierachy = _build_hierarchy(segments, features, processed_code)
-
-    return _aggregate(hierachy)
-
-
-def _docstring_token_starts(code: str) -> set[tuple[int, int]]:
-    starts: set[tuple[int, int]] = set()
-    try:
-        tree = ast.parse(code)
-    except SyntaxError:
-        return starts
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Module, ast.FunctionDef,
-                             ast.AsyncFunctionDef, ast.ClassDef)):
-            body = node.body
-            # Skip a docstring that is the sole statement of a function/class:
-            # removing it would leave an empty (invalid) body. (An empty module
-            # is fine, so module docstrings may always be removed.)
-            if (body
-                    and isinstance(body[0], ast.Expr)
-                    and isinstance(body[0].value, ast.Constant)
-                    and isinstance(body[0].value.value, str)
-                    and (isinstance(node, ast.Module) or len(body) > 1)):
-                doc = body[0].value
-                starts.add((doc.lineno, doc.col_offset))
-    return starts
-
-
-def _preprocess_code(code: str) -> str:
-    docstring_starts = _docstring_token_starts(code)
-
-    io_object = io.StringIO(code)
-    kept_tokens = []
-    last_appended_line = -1
-
-    for token in tokenize.generate_tokens(io_object.readline):
-        token_type = token.type
-        token_start_line, _ = token.start
-
-        if token_type in (tokenize.INDENT, tokenize.DEDENT):
-            continue
-
-        # filter comments
-        if token_type in (tokenize.COMMENT, tokenize.TYPE_COMMENT):
-            continue
-
-        # filter docstrings 
-        if token_type == tokenize.STRING and token.start in docstring_starts:
-            continue
-
-        # filter blank lines
-        if token_type in (tokenize.NL, tokenize.NEWLINE):
-            if token_start_line != last_appended_line:
-                continue
-
-        kept_tokens.append(token)
-        last_appended_line = token_start_line
-
-    text = tokenize.untokenize(kept_tokens)
-    # untokenize leaves a "\" line-continuation placeholder wherever a token
-    # was removed
-    lines = [ln for ln in text.splitlines(keepends=True) if ln.strip() != "\\"]
-    return "".join(lines)
-
-
-def _aggregate(root: SemanticUnit, alpha: float = 0.8) -> dict:
-    comp_levels = []      # d(v)+1 for every unit including root  
-    branch_factors = []   # b(v) for every unit including root    
-
-    def walk(node):
-        branch_factors.append(len(node.children))
-        comp_levels.append(node.depth + 1)
-        for child in node.children:
-            walk(child)
-
-    walk(root)
-
-    total_comp = sum(comp_levels)
-    total_branch = sum(branch_factors)
-    score = alpha * total_branch + (1 - alpha) * total_comp
-
-    return {
-        "lm_cc_score": score,
-        "lm_cc_max_comp": max(comp_levels),
-        "lm_cc_avg_comp": total_comp / len(comp_levels),
-        "lm_cc_total_comp": total_comp,
-        "lm_cc_max_branch": max(branch_factors),
-        "lm_cc_avg_branch": total_branch / len(branch_factors),
-        "lm_cc_total_branch": total_branch,
-    }
-
-
-def _line_indent(code: str, char_pos: int) -> int:
-    line_start = code.rfind("\n", 0, char_pos) + 1
-    indent = 0
-    for ch in code[line_start:]:
-        if ch == " ":
-            indent += 1
-        elif ch == "\t":
-            indent += 8
-        else:
-            break
-    return indent
-
-
-def _build_hierarchy(
-    segments: list[tuple[int, int]],
-    features: TokenFeatures,
-    processed_code: str,
-) -> SemanticUnit:
-    root = SemanticUnit(
-        char_start=0,
-        char_end=len(processed_code),
-        depth=0,
-        indent=-1,
-        children=[],
-    )
-    stack = [root]
-
-    for tok_start, tok_end in segments:
-        # skip empty segments
-        if tok_end <= tok_start:
-            continue
-
-        # char position
-        char_start = features.offsets[tok_start, 0].item()
-        char_end = features.offsets[tok_end - 1, 1].item()
-
-        # raw indentation of the line this unit starts on
-        level = _line_indent(processed_code, char_start)
-
-        # find parent on stack
-        while stack[-1].indent >= level:
-            stack.pop()
-        parent = stack[-1]
-
-        # create node and append
-        node = SemanticUnit(
-            char_start=char_start,
-            char_end=char_end,
-            depth=parent.depth + 1,
-            indent=level,
-            children=[],
-        )
-        parent.children.append(node)
-        stack.append(node)
-
-    return root
-
-
-def _mask_to_segments(boundaries: torch.Tensor) -> list:
-    segments = []
-    segment_start = 0
-    for i, boundary in enumerate(boundaries.tolist()):
-        # i > segment_start avoids an empty segment when the first
-        # token itself is a boundary (boundaries[0] is True).
-        if boundary and i > segment_start:
-            segments.append((segment_start, i))  # (start, end)
-            segment_start = i
-    segments.append(
-        (segment_start, len(boundaries))
-    )  # last segment has no end, doesnt access loop
-
-    return segments
-
-
-def _build_line_offsets(code: str) -> list[int]:
-    offsets = [0]
-    for i, char in enumerate(code):
-        if char == "\n":
-            offsets.append(i + 1)
-    return offsets
-
-def _find_syntactic_boundaries(code: str) -> set[int]:
-    boundary_chars = set()
-    
-    try:
-        tree = ast.parse(code)
-    except SyntaxError:
-        logger.warning(
-            "Syntactic boundary detection skipped: processed code did not parse; "
-            "falling back to entropy-only segmentation."
-        )
-        return boundary_chars
-
-    line_offsets = _build_line_offsets(code)
-    
-    target_types = (
-        ast.If, ast.For, ast.While, ast.AsyncFor,
-        ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
-        ast.Try, ast.With, ast.AsyncWith,
-    )
-    
-    for node in ast.walk(tree):
-        if isinstance(node, target_types):
-            if hasattr(node, 'end_lineno') and node.end_lineno is not None:
-                char_pos = line_offsets[node.end_lineno - 1] + node.end_col_offset
-                boundary_chars.add(char_pos)
-    
-    return boundary_chars
-
-def _syntactic_boundary_mask(
-    code: str,
-    offsets: torch.Tensor,
-) -> torch.Tensor:
-    boundary_chars = _find_syntactic_boundaries(code)
-    n_tokens = offsets.shape[0]
-    
-    if not boundary_chars:
-        return torch.zeros(n_tokens, dtype=torch.bool)
-    
-    boundary_tensor = torch.tensor(sorted(boundary_chars), dtype=offsets.dtype)
-    token_starts = offsets[:, 0].unsqueeze(1)  # (n_tokens, 1)
-    token_ends = offsets[:, 1].unsqueeze(1)    # (n_tokens, 1)
-    boundaries = boundary_tensor.unsqueeze(0)  # (1, n_boundaries)
-    
-    #  (n_tokens, n_boundaries)
-    in_range = (token_starts <= boundaries) & (boundaries < token_ends)
-
-    return in_range.any(dim=1)
-
-def _detect_boundaries(
-    code:str, offsets: torch.Tensor, entropy: torch.Tensor, threshold: float = 0.67
-) -> torch.Tensor:
-    if entropy.numel() == 0:
-        return torch.zeros(0, dtype=torch.bool)
-
-    entropy_boundary_mask = entropy >= threshold
-    # skip first token like in the reference
-    entropy_boundary_mask[0] = False
-    syntatic_boundary_mask = _syntactic_boundary_mask(code, offsets)
-    return entropy_boundary_mask | syntatic_boundary_mask
+    tokens: torch.Tensor   # (n-1,) token IDs (first token dropped)
+    entropy: torch.Tensor  # (n-1,) per-token predictive entropy, aligned to `tokens`
 
 
 @torch.no_grad()
-def compute_token_features(code: str) -> TokenFeatures:
+def _compute_token_features(code: str) -> TokenFeatures:
+    """Per-token predictive entropy H(t_i | t_<i) over the full vocabulary.
+    """
     _load()
-    inputs = _tokenizer(code, return_tensors="pt", return_offsets_mapping=True)
-    offsets = inputs.pop("offset_mapping")
-    inputs = inputs.to(_model.device)
+    inputs = _tokenizer(code, return_tensors="pt").to(_model.device)
 
     hidden = _model.model(**inputs).last_hidden_state   # (1, n, hidden_dim)
 
     chunk_size = int(os.environ.get("LM_CC_ENTROPY_CHUNK", "256"))
     n = hidden.shape[1]
     entropy = torch.empty((1, n), device=hidden.device, dtype=torch.float32)
-    
+
     for i in range(0, n, chunk_size):
         sl = slice(i, i + chunk_size)
-        chunk_logits = _model.lm_head(hidden[:, sl])           # only chunk logits
+        chunk_logits = _model.lm_head(hidden[:, sl])
         log_probs = F.log_softmax(chunk_logits, dim=-1)
         entropy[:, sl] = -(log_probs.exp() * log_probs).sum(dim=-1)
         del chunk_logits, log_probs
-    
+
     del hidden
-    
+
     return TokenFeatures(
         tokens=inputs.input_ids[0, 1:].cpu(),
         entropy=entropy[0, :-1].cpu(),
-        offsets=offsets[0, 1:],
     )
+
+
+def _get_block_cnt(node) -> int:
+    if not node:
+        return 0
+    total = 1
+    for child in node.get('children', []):
+        total += _get_block_cnt(child)
+    return total
+
+
+def _get_total_branch(node) -> int:
+    return _get_block_cnt(node) - 1
+
+
+def _get_depth_sum(node, depth=1) -> int:
+    if not node:
+        return 0
+    total = depth
+    if 'children' in node:
+        for child in node['children']:
+            total += _get_depth_sum(child, depth + 1)
+    return total
+
+
+def _get_max_depth(node, depth=1) -> int:
+    if not node:
+        return 0
+    children = node.get("children")
+    if not children:
+        return depth
+    max_d = depth
+    for child in children:
+        d = _get_max_depth(child, depth + 1)
+        if d > max_d:
+            max_d = d
+    return max_d
+
+
+def _get_avg_depth(node, depth=1) -> float:
+    if not node:
+        return 0.0
+    total_depth = _get_depth_sum(node, depth)
+    total_nodes = _get_block_cnt(node)
+    if total_nodes == 0:
+        return 0.0
+    return float(total_depth) / total_nodes
+
+
+def _get_max_width(node) -> int:
+    if not node:
+        return 0
+    level_counts = defaultdict(int)
+
+    def traverse(node, level):
+        weight = node.get("weight", 1)
+        level_counts[level] += weight
+        for child in node.get("children", []):
+            traverse(child, level + 1)
+    traverse(node, 1)
+    return max(level_counts.values())
+
+
+def _get_avg_children(node) -> float:
+    if not node:
+        return 0.0
+    internal_count = 0
+    total_children = 0
+
+    def traverse(n):
+        nonlocal internal_count, total_children
+        children = n.get("children", []) if isinstance(n, dict) else []
+        if children:
+            internal_count += 1
+            total_children += len(children)
+            for c in children:
+                traverse(c)
+    traverse(node)
+    return float(total_children) / internal_count if internal_count > 0 else 0.0
+
+
+def _get_lmcc(tree_node) -> float:
+    ALPHA = 0.8
+    total_branch = _get_total_branch(tree_node)
+    depth_sum = _get_depth_sum(tree_node, depth=1)
+    return depth_sum * (1 - ALPHA) + total_branch * ALPHA
+
+
+def _zero_metrics() -> dict:
+    return {
+        "lm_cc_score": 0.0,
+        "lm_cc_total_comp": 0,
+        "lm_cc_total_branch": 0,
+        "lm_cc_max_comp": 0,
+        "lm_cc_avg_comp": 0.0,
+        "lm_cc_max_branch": 0,
+        "lm_cc_avg_branch": 0.0,
+    }
+
+
+def _metrics_from_tree(block_tree: dict) -> dict:
+    return {
+        "lm_cc_score": _get_lmcc(block_tree),
+        "lm_cc_total_comp": _get_depth_sum(block_tree),
+        "lm_cc_total_branch": _get_total_branch(block_tree),
+        "lm_cc_max_comp": _get_max_depth(block_tree),
+        "lm_cc_avg_comp": _get_avg_depth(block_tree),
+        "lm_cc_max_branch": _get_max_width(block_tree),
+        "lm_cc_avg_branch": _get_avg_children(block_tree),
+    }
+
+def compute_lm_cc(code: str) -> dict:
+    features = _compute_token_features(code)
+    if features.entropy.numel() == 0:
+        return _zero_metrics()
+
+    token_strings = _tokenizer.convert_ids_to_tokens(features.tokens.tolist())
+    entropies = features.entropy.tolist()
+
+    # Line reconstruction needs SentencePiece tokens (CodeLlama).
+    if not any(("▁" in t) or (t == "<0x0A>") for t in token_strings[:64]):
+        logger.warning(
+            "LM_CC expects a SentencePiece tokenizer (e. g. CodeLlama)."
+        )
+
+    code_with_boundaries, _, start_end_tokens = get_code_with_boundaries(
+        token_strings, entropies, threshold=_THRESHOLD
+    )
+    block_tree = CodeBlockProcessor().parse_code_blocks(
+        code_with_boundaries, tokens=token_strings, start_end_tokens=start_end_tokens
+    )
+    return _metrics_from_tree(block_tree)

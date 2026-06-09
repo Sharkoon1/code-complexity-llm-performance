@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from src.config import PATHS
 from src.shared import cache_path
 from src.lm_cc import compute_lm_cc
+from src.preprocess import normalize
 from src.patches import extract_patched_functions
 from radon.complexity import cc_visit
 from radon.metrics import h_visit
@@ -39,11 +40,12 @@ def compute_whole_file_metrics(filtered_dataset: pd.DataFrame) -> pd.DataFrame:
         except OSError as e:
             logger.error(f"Error reading cache for {row['instance_id']}: {e}")
             raise
-        code = _normalize_code(raw_code)
-
         metrics = {"instance_id": row["instance_id"]}
 
         try:
+            code = normalize(raw_code)
+            if code is None:
+                raise ValueError("preprocessing (black) failed")
             metrics.update({"parsable": True, **metrics_for_code(code)})
         except Exception as e:
             logger.error(f"Error computing metrics for {row['instance_id']}: {e}")
@@ -66,10 +68,13 @@ def compute_function_metrics(filtered_dataset: pd.DataFrame) -> pd.DataFrame:
             if function_source is None:
                 metrics.update(has_patched_function=False, parsable=True)
             else:
+                code = normalize(function_source)
+                if code is None:
+                    raise ValueError("preprocessing (black) failed")
                 metrics.update(
                     has_patched_function=True,
                     parsable=True,
-                    **metrics_for_code(_normalize_code(function_source)),
+                    **metrics_for_code(code),
                 )
         except Exception as error:
             logger.error(f"Error computing function metrics for {row['instance_id']}: {error}")
@@ -84,25 +89,6 @@ def compute_function_metrics(filtered_dataset: pd.DataFrame) -> pd.DataFrame:
         f"have a patched function ({excluded} excluded)."
     )
     return pd.DataFrame(metrics_list)
-
-def _normalize_code(code:str) -> str: 
-    try:
-        tree = ast.parse(code)
-    except SyntaxError:
-        return code
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Module, ast.FunctionDef,
-                             ast.AsyncFunctionDef, ast.ClassDef)):
-            if (node.body
-                    and isinstance(node.body[0], ast.Expr)
-                    and isinstance(node.body[0].value, ast.Constant)
-                    and isinstance(node.body[0].value.value, str)):
-                node.body.pop(0)
-                # a function/class whose only statement was the docstring would
-                # otherwise be left with an empty (invalid) body -> keep a `pass`
-                if not node.body and not isinstance(node, ast.Module):
-                    node.body.append(ast.Pass())
-    return ast.unparse(ast.fix_missing_locations(tree))
 
 def _compute_cyclomatic(code: str) -> dict:
     results = cc_visit(code)
