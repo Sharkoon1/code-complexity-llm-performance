@@ -92,23 +92,23 @@ def full_correlation_table(df: pd.DataFrame, metrics: list[str],
     rows = []
     
     for metric in metrics:
-        # Sample-level zero-order
+        # sample-level zero-order
         rho_s0, p_s0 = spearmanr(df[metric], df[score])
         
-        # Sample-level partial (skip if metric is the control variable)
+        # sample-level partial (skip if metric is the control variable)
         if metric == control:
             sample_partial = "—"
         else:
             rho_sp, p_sp = partial_spearman(df, metric, score, control)
             sample_partial = f"{rho_sp:+.3f} (p={p_sp:.3f})"
         
-        # Subgroup zero-order
+        # subgroup zero-order
         sub_zero = best_subgroup_result(df, metric, score, control=None)
         subgroup_zero = (
             f"{sub_zero['rho']:+.3f} (p={sub_zero['p']:.3f}, n={sub_zero['n_bins']})"
         )
         
-        # Subgroup partial (skip if metric is control)
+        # subgroup partial (skip if metric is control)
         if metric == control:
             subgroup_partial = "—"
         else:
@@ -124,5 +124,40 @@ def full_correlation_table(df: pd.DataFrame, metrics: list[str],
             "subgroup_zero": subgroup_zero,
             f"subgroup_partial_{control}": subgroup_partial,
         })
-    
+
     return pd.DataFrame(rows)
+
+
+def per_agent_correlation_table(df: pd.DataFrame, metric: str = "lm_cc_score",
+                                 score: str = "resolved",
+                                 control: str = "loc") -> pd.DataFrame:
+    """One row per agent - resolve rate and the four correlation of `metric`
+    vs agent's `resolved`.
+
+    `df` is the predictions table (instance_id, model, resolved) merged with the
+    per-task `metric` and `control` columns. Reuses spearmanr / partial_spearman /
+    best_subgroup_result. Agents that resolved none/all tasks are skipped.
+    """
+    rows = []
+    for agent, group in df.groupby("model"):
+        group = group.dropna(subset=[metric, score, control])
+        if len(group) < 30 or group[score].nunique() < 2:
+            continue
+        rho_s0, _ = spearmanr(group[metric], group[score])
+        rho_sp, _ = partial_spearman(group, metric, score, control)
+        sub_zero = best_subgroup_result(group, metric, score, control=None)
+        sub_partial = best_subgroup_result(group, metric, score, control=control)
+        rows.append({
+            "agent": agent,
+            "resolve_rate": group[score].mean(),
+            "sample_zero": rho_s0,
+            "sample_partial_loc": rho_sp,
+            "subgroup_zero": sub_zero["rho"],
+            "subgroup_partial_loc": sub_partial["rho"],
+        })
+
+    return (
+        pd.DataFrame(rows)
+        .sort_values("resolve_rate", ascending=False)
+        .reset_index(drop=True)
+    )

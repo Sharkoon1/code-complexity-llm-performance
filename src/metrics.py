@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from src.config import PATHS
 from src.shared import cache_path
 from src.lm_cc import compute_lm_cc
+from src.patches import extract_patched_functions
 from radon.complexity import cc_visit
 from radon.metrics import h_visit
 from radon.raw import analyze
@@ -14,7 +15,21 @@ from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
-def compute_metrics(filtered_dataset: pd.DataFrame) -> pd.DataFrame:
+def metrics_for_code(code: str) -> dict:
+    """All complexity metrics (classical + LM-CC) for a single code string."""
+    return {
+        **_compute_cyclomatic(code),
+        **_compute_halstead(code),
+        **_compute_loc(code),
+        **_compute_nesting(code),
+        **_compute_token_count(code),
+        **_compute_function_count(code),
+        **_compute_branches(code),
+        **compute_lm_cc(code),
+    }
+
+
+def compute_whole_file_metrics(filtered_dataset: pd.DataFrame) -> pd.DataFrame:
     metrics_list = []
 
     for _, row in tqdm(filtered_dataset.iterrows(), total=len(filtered_dataset)):
@@ -29,26 +44,46 @@ def compute_metrics(filtered_dataset: pd.DataFrame) -> pd.DataFrame:
         metrics = {"instance_id": row["instance_id"]}
 
         try:
-            metrics.update({
-                "parsable": True,
-                **_compute_cyclomatic(code),
-                **_compute_halstead(code),
-                **_compute_loc(code),
-                **_compute_nesting(code),
-                **_compute_token_count(code),
-                **_compute_function_count(code),
-                **_compute_branches(code),
-                **compute_lm_cc(code),
-            })
+            metrics.update({"parsable": True, **metrics_for_code(code)})
         except Exception as e:
             logger.error(f"Error computing metrics for {row['instance_id']}: {e}")
             metrics["parsable"] = False
             metrics["error"] = f"{type(e).__name__}: {e}"
-        
+
         metrics_list.append(metrics)
 
-    metrics_df = pd.DataFrame(metrics_list)
-    return metrics_df
+    return pd.DataFrame(metrics_list)
+
+
+def compute_function_metrics(filtered_dataset: pd.DataFrame) -> pd.DataFrame:
+    metrics_list = []
+
+    for _, row in tqdm(filtered_dataset.iterrows(), total=len(filtered_dataset)):
+        metrics = {"instance_id": row["instance_id"]}
+        try:
+            raw_code = cache_path(row["repo"], row["base_commit"], row["python_files"][0]).read_text()
+            function_source = extract_patched_functions(row["patch"], raw_code, row["python_files"][0])
+            if function_source is None:
+                metrics.update(has_patched_function=False, parsable=True)
+            else:
+                metrics.update(
+                    has_patched_function=True,
+                    parsable=True,
+                    **metrics_for_code(_normalize_code(function_source)),
+                )
+        except Exception as error:
+            logger.error(f"Error computing function metrics for {row['instance_id']}: {error}")
+            metrics["parsable"] = False
+            metrics["error"] = f"{type(error).__name__}: {error}"
+
+        metrics_list.append(metrics)
+
+    excluded = sum(1 for entry in metrics_list if not entry.get("has_patched_function"))
+    logger.info(
+        f"Function-level: {len(metrics_list) - excluded}/{len(metrics_list)} tasks "
+        f"have a patched function ({excluded} excluded)."
+    )
+    return pd.DataFrame(metrics_list)
 
 def _normalize_code(code:str) -> str: 
     try:

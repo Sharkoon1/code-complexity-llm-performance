@@ -1,3 +1,4 @@
+import ast
 import logging
 import pandas as pd
 from unidiff import PatchSet
@@ -36,3 +37,40 @@ def _parse(patch_text: str) -> dict:
             pf.is_added_file and pf.path.endswith(".py") for pf in ps
         ),
     }
+
+
+def extract_patched_functions(patch_text: str, pre_patch_source: str, file_path: str) -> str | None:
+    patch_set = PatchSet(patch_text)
+    affected_lines = set()
+    for patched_file in patch_set:
+        if patched_file.path != file_path:
+            continue
+        for hunk in patched_file:
+            removed = {line.source_line_no for line in hunk if line.is_removed and line.source_line_no}
+            affected_lines |= removed or {
+                line.source_line_no for line in hunk if line.is_context and line.source_line_no
+            }
+    if not affected_lines:
+        return None
+
+    try:
+        tree = ast.parse(pre_patch_source)
+    except SyntaxError:
+        return None
+
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    top_level_functions = [
+        node for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and isinstance(parents.get(node), (ast.Module, ast.ClassDef))
+    ]
+    selected = sorted(
+        (
+            function for function in top_level_functions
+            if affected_lines & set(range(function.lineno, (function.end_lineno or function.lineno) + 1))
+        ),
+        key=lambda function: function.lineno,
+    )
+    if not selected:
+        return None
+    return "\n\n".join(ast.get_source_segment(pre_patch_source, function) for function in selected)

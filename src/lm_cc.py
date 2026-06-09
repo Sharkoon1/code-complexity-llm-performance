@@ -93,9 +93,9 @@ def _docstring_token_starts(code: str) -> set[tuple[int, int]]:
         if isinstance(node, (ast.Module, ast.FunctionDef,
                              ast.AsyncFunctionDef, ast.ClassDef)):
             body = node.body
-            # Skip a docstring that is the SOLE statement of a function/class:
+            # Skip a docstring that is the sole statement of a function/class:
             # removing it would leave an empty (invalid) body. (An empty module
-            # is fine, so Module docstrings may always be removed.)
+            # is fine, so module docstrings may always be removed.)
             if (body
                     and isinstance(body[0], ast.Expr)
                     and isinstance(body[0].value, ast.Constant)

@@ -33,4 +33,18 @@ def build_labeled_dataset() -> pd.DataFrame:
     logger.info(f"Status distribution:\n{df['status'].value_counts().to_string()}")
     logger.info(f"Resolve rate: {df['resolved'].mean():.1%}")
 
+    try:
+        difficulty = pd.read_parquet(PATHS.TASK_DIFFICULTY)
+    except OSError as e:
+        logger.error(f"Error reading {PATHS.TASK_DIFFICULTY}: {e}")
+        raise
+
+    df = df.merge(difficulty, on="instance_id", how="left")
+    n_missing_rate = df["resolution_rate"].isna().sum()
+    if n_missing_rate:
+        logger.warning(
+            f"{n_missing_rate} tasks without a resolution_rate. Check the predictions loader"
+        )
+    logger.info(f"Mean resolution_rate across all agents: {df['resolution_rate'].mean():.1%}")
+
     return df
