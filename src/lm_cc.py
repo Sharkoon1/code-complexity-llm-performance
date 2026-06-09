@@ -51,7 +51,7 @@ def _load():
         _tokenizer = AutoTokenizer.from_pretrained(model_name)
         _model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            torch_dtype=torch.float16,
+            torch_dtype=torch.float32,
         ).to(_get_device())
         _model.eval()
     except Exception as e:
