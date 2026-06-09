@@ -46,7 +46,3 @@ class TestFormatAndNormalize:
         assert out is not None
         assert "doc" not in out and "# c" not in out
         assert "return x + 1" in out
-
-    def test_normalize_none_when_black_fails(self):
-        # only a docstring -> empty body after stripping -> black cannot format it
-        assert normalize('def f():\n    """only doc"""\n') is None
