@@ -18,6 +18,7 @@ def main():
 
     tasks = load_swe_bench().pipe(sink, PATHS.SWEBENCH_TASKS)
     fetch_model_bench_predictions("20241202_agentless-1.5_claude-3.5-sonnet-20241022/").pipe(sink, PATHS.AGENTLESS_LABELS)
+    fetch_model_bench_predictions("20240620_sweagent_claude3.5sonnet/").pipe(sink, PATHS.SWEAGENT_LABELS)
 
     predictions = fetch_all_model_predictions(tasks["instance_id"].tolist())
     predictions.pipe(sink, PATHS.ALL_PREDICTIONS)

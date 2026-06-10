@@ -23,6 +23,7 @@ class Config:
 
     SWEBENCH_TASKS: Path = RAW / "swebench_verified.parquet"
     AGENTLESS_LABELS: Path = RAW / "agentless_claude35sonnet_labels.parquet"
+    SWEAGENT_LABELS: Path = RAW / "sweagent_claude35sonnet_labels.parquet"
     ALL_PREDICTIONS: Path = RAW / "swebench_all_predictions.parquet"
     TASK_DIFFICULTY: Path = INTERIM / "swebench_task_difficulty.parquet"
     LABELED_DATASET: Path = INTERIM / "swebench_claude35sonnet.parquet"
