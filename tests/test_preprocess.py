@@ -20,7 +20,9 @@ class TestRemoveCommentsDocstrings:
         assert "x = 1" in out and "y = 2" in out
 
     def test_removes_docstring(self):
-        out = _remove_comments_and_docstrings('def f():\n    """doc prose"""\n    return 1\n')
+        out = _remove_comments_and_docstrings(
+            'def f():\n    """doc prose"""\n    return 1\n'
+        )
         assert "prose" not in out
         assert "return 1" in out
 

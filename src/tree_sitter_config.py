@@ -1,5 +1,4 @@
-"""Tree-sitter Python parser used to build the semantic block tree.
-"""
+"""Tree-sitter Python parser used to build the semantic block tree."""
 
 import tree_sitter_python
 from tree_sitter import Language, Parser

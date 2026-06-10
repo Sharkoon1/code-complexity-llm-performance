@@ -8,6 +8,7 @@ from src.shared import cache_path
 
 logger = logging.getLogger(__name__)
 
+
 def load_swe_bench() -> pd.DataFrame:
     try:
         ds = load_dataset(
@@ -144,9 +145,9 @@ def _fetch_github_pre_patch_file(repo: str, base_commit: str, file_path: str) ->
 def fetch_all_pre_patch_files(labeled_dataset: pd.DataFrame) -> None:
     for _, row in tqdm(labeled_dataset.iterrows(), total=len(labeled_dataset)):
         cache = cache_path(row["repo"], row["base_commit"], row["python_files"][0])
-        
+
         if cache.exists():
-            continue     
+            continue
         try:
             code = _fetch_github_pre_patch_file(
                 repo=row["repo"],
@@ -156,6 +157,6 @@ def fetch_all_pre_patch_files(labeled_dataset: pd.DataFrame) -> None:
         except requests.RequestException as e:
             logger.error(f"Error fetching {row['instance_id']}: {e}")
             continue
-        
+
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(code, encoding="utf-8")

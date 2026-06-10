@@ -1,5 +1,4 @@
-"""Source-code normalization shared by all complexity metrics.
-"""
+"""Source-code normalization shared by all complexity metrics."""
 
 import ast
 import logging
@@ -16,16 +15,19 @@ def _remove_comments_and_docstrings(code: str) -> str:
     try:
         tree = ast.parse(code)
     except SyntaxError:
-        return code  # leave un-parseable code to black (which will skip it)
+        return code  # leave un-parseable code to black formatter
 
     for node in ast.walk(tree):
-        if isinstance(node, (ast.Module, ast.FunctionDef,
-                             ast.AsyncFunctionDef, ast.ClassDef)):
+        if isinstance(
+            node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+        ):
             body = node.body
-            if (body
-                    and isinstance(body[0], ast.Expr)
-                    and isinstance(body[0].value, ast.Constant)
-                    and isinstance(body[0].value.value, str)):
+            if (
+                body
+                and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)
+            ):
                 body.pop(0)
                 if not body and not isinstance(node, ast.Module):
                     body.append(ast.Pass())
@@ -34,22 +36,21 @@ def _remove_comments_and_docstrings(code: str) -> str:
 
 
 def _format_python_code(code: str):
-    # strip decorators
     if "@" in code:
-        code = '\n'.join(line for line in code.split('\n') if not (line.strip().startswith("@")))
-    # normalize indentation
+        code = "\n".join(
+            line for line in code.split("\n") if not (line.strip().startswith("@"))
+        )
     code = dedent(code)
     random_filename = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.py")
     try:
-        with open(random_filename, 'w') as f:
+        with open(random_filename, "w") as f:
             f.write(code)
-        # run black formatting
         try:
             subprocess.run(
                 ["black", "--quiet", "--fast", random_filename],
                 check=True,
                 capture_output=True,
-                text=True
+                text=True,
             )
         except subprocess.CalledProcessError as e:
             try:
@@ -57,12 +58,12 @@ def _format_python_code(code: str):
                     ["black", "--quiet", random_filename],
                     check=True,
                     capture_output=True,
-                    text=True
+                    text=True,
                 )
             except subprocess.CalledProcessError as e:
                 logger.warning("black could not format the code: %s", e.stderr)
                 return None
-        with open(random_filename, 'r') as f:
+        with open(random_filename, "r") as f:
             formatted_code = f.read()
         return formatted_code
     except Exception as e:

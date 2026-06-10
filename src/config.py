@@ -29,4 +29,6 @@ class Config:
     FILTERED_DATASET: Path = INTERIM / "swebench_claude35sonnet_filtered.parquet"
     WHOLE_FILE_RESULT_DATASET: Path = RESULT / "swe_bench_whole_file_result.parquet"
     FUNCTION_RESULT_DATASET: Path = RESULT / "swe_bench_function_result.parquet"
-PATHS = Config()  
+
+
+PATHS = Config()

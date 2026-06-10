@@ -16,6 +16,7 @@ from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
+
 def metrics_for_code(code: str) -> dict:
     """All complexity metrics (classical + LM-CC) for a single code string."""
     return {
@@ -63,8 +64,12 @@ def compute_function_metrics(filtered_dataset: pd.DataFrame) -> pd.DataFrame:
     for _, row in tqdm(filtered_dataset.iterrows(), total=len(filtered_dataset)):
         metrics = {"instance_id": row["instance_id"]}
         try:
-            raw_code = cache_path(row["repo"], row["base_commit"], row["python_files"][0]).read_text()
-            function_source = extract_patched_functions(row["patch"], raw_code, row["python_files"][0])
+            raw_code = cache_path(
+                row["repo"], row["base_commit"], row["python_files"][0]
+            ).read_text()
+            function_source = extract_patched_functions(
+                row["patch"], raw_code, row["python_files"][0]
+            )
             if function_source is None:
                 metrics.update(has_patched_function=False, parsable=True)
             else:
@@ -77,7 +82,9 @@ def compute_function_metrics(filtered_dataset: pd.DataFrame) -> pd.DataFrame:
                     **metrics_for_code(code),
                 )
         except Exception as error:
-            logger.error(f"Error computing function metrics for {row['instance_id']}: {error}")
+            logger.error(
+                f"Error computing function metrics for {row['instance_id']}: {error}"
+            )
             metrics["parsable"] = False
             metrics["error"] = f"{type(error).__name__}: {error}"
 
@@ -89,6 +96,7 @@ def compute_function_metrics(filtered_dataset: pd.DataFrame) -> pd.DataFrame:
         f"have a patched function ({excluded} excluded)."
     )
     return pd.DataFrame(metrics_list)
+
 
 def _compute_cyclomatic(code: str) -> dict:
     results = cc_visit(code)
@@ -122,52 +130,59 @@ def _compute_loc(code: str) -> dict:
         "sloc": raw.sloc,
     }
 
+
 def _max_nesting_depth(node, current_depth=0):
     max_depth = current_depth
-    
+
     nesting_types = (ast.If, ast.For, ast.While, ast.AsyncFor, ast.Try, ast.With)
-    
+
     for child in ast.iter_child_nodes(node):
         if isinstance(child, nesting_types):
             child_depth = _max_nesting_depth(child, current_depth + 1)
         else:
             child_depth = _max_nesting_depth(child, current_depth)
         max_depth = max(max_depth, child_depth)
-    
+
     return max_depth
+
 
 def _compute_nesting(code: str) -> dict:
     tree = ast.parse(code)
     max_depth = _max_nesting_depth(tree)
     return {"nesting_max": max_depth}
 
+
 def _compute_token_count(code: str) -> dict:
     tokens = list(tokenize.generate_tokens(io.StringIO(code).readline))
     meaningful_types = {tokenize.NAME, tokenize.OP, tokenize.NUMBER, tokenize.STRING}
     meaningful_tokens = [t for t in tokens if t.type in meaningful_types]
-    
+
     return {
         "n_tokens_total": len(tokens),
         "n_tokens_meaningful": len(meaningful_tokens),
     }
 
+
 def _compute_function_count(code: str) -> dict:
     tree = ast.parse(code)
-    
-    n_funcs = sum(1 for node in ast.walk(tree) 
-                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))
-    n_classes = sum(1 for node in ast.walk(tree) 
-                    if isinstance(node, ast.ClassDef))
-    
+
+    n_funcs = sum(
+        1
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    )
+    n_classes = sum(1 for node in ast.walk(tree) if isinstance(node, ast.ClassDef))
+
     return {
         "n_functions": n_funcs,
         "n_classes": n_classes,
     }
 
+
 def _compute_branches(code: str) -> dict:
     tree = ast.parse(code)
-    
+
     branch_types = (ast.If, ast.For, ast.While, ast.Try, ast.AsyncFor)
     n_branches = sum(1 for node in ast.walk(tree) if isinstance(node, branch_types))
-    
+
     return {"n_branches": n_branches}

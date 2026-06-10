@@ -4,6 +4,7 @@ from src.config import PATHS
 
 logger = logging.getLogger(__name__)
 
+
 def build_labeled_dataset() -> pd.DataFrame:
     try:
         tasks = pd.read_parquet(PATHS.SWEBENCH_TASKS)
@@ -45,6 +46,8 @@ def build_labeled_dataset() -> pd.DataFrame:
         logger.warning(
             f"{n_missing_rate} tasks without a resolution_rate. Check the predictions loader"
         )
-    logger.info(f"Mean resolution_rate across all agents: {df['resolution_rate'].mean():.1%}")
+    logger.info(
+        f"Mean resolution_rate across all agents: {df['resolution_rate'].mean():.1%}"
+    )
 
     return df

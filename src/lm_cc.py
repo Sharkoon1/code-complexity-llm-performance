@@ -1,14 +1,4 @@
-"""LM-CC: model-perceived code complexity (Xie et al., arXiv:2602.07882).
-
-This module owns the two LM-CC-specific concerns:
-  - token entropy from a code language model (`_compute_token_features`), and
-  - the LM-CC features computed over the semantic block tree (`_get_lmcc`, ...).
-
-`compute_lm_cc(code)` orchestrates:
-entropy -> block tree (`src.block_tree`) -> features. It expects already normalized
-code. The shared preprocessing lives in `src.preprocess` and
-is applied once upstream (see `src.metrics`).
-"""
+"""LM-CC: model-perceived code complexity (Xie et al., arXiv:2602.07882)."""
 
 import logging
 import os
@@ -61,18 +51,16 @@ def _load():
 
 @dataclass
 class TokenFeatures:
-    tokens: torch.Tensor   # (n-1,) token IDs (first token dropped)
-    entropy: torch.Tensor  # (n-1,) per-token predictive entropy, aligned to `tokens`
+    tokens: torch.Tensor  # (n-1,) 
+    entropy: torch.Tensor  # (n-1,) 
 
 
 @torch.no_grad()
 def _compute_token_features(code: str) -> TokenFeatures:
-    """Per-token predictive entropy H(t_i | t_<i) over the full vocabulary.
-    """
     _load()
     inputs = _tokenizer(code, return_tensors="pt").to(_model.device)
 
-    hidden = _model.model(**inputs).last_hidden_state   # (1, n, hidden_dim)
+    hidden = _model.model(**inputs).last_hidden_state  # (1, n, hidden_dim)
 
     chunk_size = int(os.environ.get("LM_CC_ENTROPY_CHUNK", "256"))
     n = hidden.shape[1]
@@ -97,7 +85,7 @@ def _get_block_cnt(node) -> int:
     if not node:
         return 0
     total = 1
-    for child in node.get('children', []):
+    for child in node.get("children", []):
         total += _get_block_cnt(child)
     return total
 
@@ -110,8 +98,8 @@ def _get_depth_sum(node, depth=1) -> int:
     if not node:
         return 0
     total = depth
-    if 'children' in node:
-        for child in node['children']:
+    if "children" in node:
+        for child in node["children"]:
             total += _get_depth_sum(child, depth + 1)
     return total
 
@@ -150,6 +138,7 @@ def _get_max_width(node) -> int:
         level_counts[level] += weight
         for child in node.get("children", []):
             traverse(child, level + 1)
+
     traverse(node, 1)
     return max(level_counts.values())
 
@@ -168,6 +157,7 @@ def _get_avg_children(node) -> float:
             total_children += len(children)
             for c in children:
                 traverse(c)
+
     traverse(node)
     return float(total_children) / internal_count if internal_count > 0 else 0.0
 
@@ -202,6 +192,7 @@ def _metrics_from_tree(block_tree: dict) -> dict:
         "lm_cc_avg_branch": _get_avg_children(block_tree),
     }
 
+
 def compute_lm_cc(code: str) -> dict:
     features = _compute_token_features(code)
     if features.entropy.numel() == 0:
@@ -210,11 +201,9 @@ def compute_lm_cc(code: str) -> dict:
     token_strings = _tokenizer.convert_ids_to_tokens(features.tokens.tolist())
     entropies = features.entropy.tolist()
 
-    # Line reconstruction needs SentencePiece tokens (CodeLlama).
+    # Line reconstruction needs SentencePiece tokens (CodeLlama)
     if not any(("▁" in t) or (t == "<0x0A>") for t in token_strings[:64]):
-        logger.warning(
-            "LM_CC expects a SentencePiece tokenizer (e. g. CodeLlama)."
-        )
+        logger.warning("LM_CC expects a SentencePiece tokenizer (e.g. CodeLlama)")
 
     code_with_boundaries, _, start_end_tokens = get_code_with_boundaries(
         token_strings, entropies, threshold=_THRESHOLD

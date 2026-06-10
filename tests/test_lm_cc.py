@@ -1,5 +1,4 @@
-"""Tests for the LM-CC feature definitions + the Proposition B.1 structural claim.
-"""
+"""Tests for the LM-CC feature definitions + the Proposition B.1 structural claim."""
 
 import os
 
@@ -37,10 +36,10 @@ class TestFeatureDefinitions:
     TREE = {"children": [{"children": [{"children": []}]}, {"children": []}]}
 
     def test_total_branch(self):
-        assert _get_total_branch(self.TREE) == 3            # N - 1
+        assert _get_total_branch(self.TREE) == 3  # N - 1
 
     def test_depth_sum(self):
-        assert _get_depth_sum(self.TREE) == 1 + 2 + 3 + 2   # 8
+        assert _get_depth_sum(self.TREE) == 1 + 2 + 3 + 2  # 8
 
     def test_lmcc(self):
         assert _get_lmcc(self.TREE) == pytest.approx(0.8 * 3 + 0.2 * 8)
@@ -52,7 +51,7 @@ class TestFeatureDefinitions:
         assert _get_avg_depth(self.TREE) == pytest.approx(8 / 4)
 
     def test_max_width(self):
-        assert _get_max_width(self.TREE) == 2               # level 2 holds A and B
+        assert _get_max_width(self.TREE) == 2  # level 2 holds A and B
 
     def test_avg_children(self):
         assert _get_avg_children(self.TREE) == pytest.approx(3 / 2)
