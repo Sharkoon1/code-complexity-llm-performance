@@ -68,8 +68,8 @@ Analysis notebooks live in `notebooks/`, one per agent and level (whole file and
 ## References
 
 - Xie, C., Shi, Y., Gu, X., & Shen, B. (2026). *Rethinking Code Complexity Through the Lens of Large Language Models*. arXiv:2602.07882
-- Jimenez, C. E. et al. (2024). *SWE-bench: Can Language Models Resolve Real-World GitHub Issues?* ICLR 2024. https://github.com/SWE-bench/SWE-bench
-- SWE-bench-Live. https://github.com/microsoft/SWE-bench-Live
+- Jimenez, C. E. et al. (2024). *SWE-bench: Can Language Models Resolve Real-World GitHub Issues?* ICLR 2024. [arXiv:2310.06770](https://arxiv.org/abs/2310.06770). https://github.com/SWE-bench/SWE-bench
+- Zhang, L. et al. (2025). *SWE-bench Goes Live!* [arXiv:2505.23419](https://arxiv.org/abs/2505.23419). https://github.com/microsoft/SWE-bench-Live
 
 ## License
 
