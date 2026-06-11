@@ -23,7 +23,7 @@ For each task:
 3. Join each agent's resolved labels
 4. Correlate metric values with task success and difficulty
 
-LM-CC follows [Xie et al., 2026](https://arxiv.org/abs/2602.07882): entropy-based segmentation via a code language model, tree-sitter hierarchical decomposition, aggregation over depth and branching factor.
+[LM-CC](src/lm_cc.py) follows [Xie et al., 2026](https://arxiv.org/abs/2602.07882): entropy-based segmentation via a code language model, tree-sitter hierarchical decomposition, aggregation over depth and branching factor.
 
 ## Setup
 
