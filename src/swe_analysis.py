@@ -155,8 +155,8 @@ def all_agents_report(result_path, title=""):
 
 
 def whole_vs_function_report():
-    file_df = pd.read_parquet(PATHS.WHOLE_FILE_RESULT_DATASET)
-    function_df = pd.read_parquet(PATHS.FUNCTION_RESULT_DATASET)
+    file_df = pd.read_parquet(PATHS.VERIFIED_WHOLE_FILE_RESULT_DATASET)
+    function_df = pd.read_parquet(PATHS.VERIFIED_FUNCTION_RESULT_DATASET)
     difficulty = pd.read_parquet(PATHS.TASK_DIFFICULTY)
     merged = (
         file_df.merge(function_df, on="instance_id", suffixes=("_file", "_fn"))

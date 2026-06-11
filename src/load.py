@@ -9,20 +9,25 @@ from src.shared import cache_path
 logger = logging.getLogger(__name__)
 
 
-def load_swe_bench() -> pd.DataFrame:
+def load_swe_bench(split: str = PATHS.SWEBENCH_SPLIT) -> pd.DataFrame:
     try:
-        ds = load_dataset(
-            "princeton-nlp/SWE-bench_Verified",
-            split="test",
-            revision=PATHS.REVISION,
-        )
+        ds = load_dataset(PATHS.SWEBENCH_DATASET, split=split, revision=PATHS.REVISION)
     except Exception as e:
-        logger.error(f"Error fetching SWE-bench_Verified dataset: {e}")
+        logger.error(f"Error fetching {PATHS.SWEBENCH_DATASET} ({split}): {e}")
         raise
     return ds.to_pandas()
 
 
-def fetch_model_bench_predictions(predicition_set: str) -> pd.DataFrame:
+def load_swe_bench_live(split: str = PATHS.SWEBENCH_LIVE_SPLIT) -> pd.DataFrame:
+    try:
+        ds = load_dataset(PATHS.SWEBENCH_LIVE_DATASET, split=split)
+    except Exception as e:
+        logger.error(f"Error fetching {PATHS.SWEBENCH_LIVE_DATASET} ({split}): {e}")
+        raise
+    return ds.to_pandas()
+
+
+def fetch_swe_bench_submission_labels(predicition_set: str) -> pd.DataFrame:
     url = (
         "https://raw.githubusercontent.com/SWE-bench/experiments/"
         f"{PATHS.EXPERIMENTS_REVISION}/evaluation/verified/"
@@ -63,6 +68,46 @@ def fetch_model_bench_predictions(predicition_set: str) -> pd.DataFrame:
     return df
 
 
+def fetch_swe_bench_live_submission_labels(
+    submission: str, revision: str = PATHS.SUBMISSION_REPO_REVISION
+) -> pd.DataFrame:
+    base = (
+        "https://raw.githubusercontent.com/SWE-bench-Live/submission/"
+        f"{revision}/{submission}"
+    )
+    try:
+        preds_response = requests.get(f"{base}/preds.json", timeout=30)
+        preds_response.raise_for_status()
+        results_response = requests.get(f"{base}/results.json", timeout=30)
+        results_response.raise_for_status()
+    except requests.RequestException as e:
+        logger.error(f"Error fetching submission {submission}: {e}")
+        raise
+
+    preds = preds_response.json()
+    results = results_response.json()
+    resolved = set(results.get("resolved_ids", []))
+    empty_patch = set(results.get("empty_patch_ids", []))
+
+    def status_for(iid):
+        if iid in resolved:
+            return "resolved"
+        if iid in empty_patch or not (preds[iid].get("model_patch") or "").strip():
+            return "no_generation"
+        return "unresolved"
+
+    instance_ids = sorted(preds)
+    df = pd.DataFrame(
+        {
+            "instance_id": instance_ids,
+            "status": [status_for(i) for i in instance_ids],
+        }
+    )
+    df["resolved"] = df["status"] == "resolved"
+
+    return df
+
+
 def list_verified_submissions(revision: str = PATHS.EXPERIMENTS_REVISION) -> list[str]:
     url = (
         "https://api.github.com/repos/SWE-bench/experiments/"
@@ -92,7 +137,7 @@ def _fetch_resolved_ids(submission: str, revision: str) -> set[str] | None:
         return None
 
 
-def fetch_all_model_predictions(
+def fetch_all_swe_bench_submissions(
     task_ids: list[str],
     revision: str = PATHS.EXPERIMENTS_REVISION,
     force: bool = False,

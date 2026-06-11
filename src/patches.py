@@ -6,11 +6,9 @@ from unidiff import PatchSet
 logger = logging.getLogger(__name__)
 
 
-def filter_patches(labeled_dataset: pd.DataFrame) -> pd.DataFrame:
-    filtered = labeled_dataset[
-        (labeled_dataset["n_python_files"] == 1)
-        & (~labeled_dataset["has_new_python_file"])
-        & (labeled_dataset["status"] != "no_generation")
+def filter_patches(dataset: pd.DataFrame) -> pd.DataFrame:
+    filtered = dataset[
+        (dataset["n_python_files"] == 1) & (~dataset["has_new_python_file"])
     ]
     return filtered.copy()
 
