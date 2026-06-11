@@ -1,4 +1,4 @@
-.PHONY: format test run verify verify-model
+.PHONY: format test run-swe-bench run-swe-bench-live verify verify-model
 
 format:
 	uv run black src tests
@@ -6,8 +6,11 @@ format:
 test:
 	uv run pytest
 
-run:
-	uv run main.py
+run-swe-bench:
+	uv run run_swe_bench.py
+
+run-swe-bench-live:
+	uv run run_swe_bench_live.py
 
 verify:
 	uv run python -m src.verify_xcodeeval --mode model-free
