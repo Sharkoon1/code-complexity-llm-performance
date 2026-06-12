@@ -51,8 +51,8 @@ def _load():
 
 @dataclass
 class TokenFeatures:
-    tokens: torch.Tensor  # (n-1,) 
-    entropy: torch.Tensor  # (n-1,) 
+    tokens: torch.Tensor  # (n-1,)
+    entropy: torch.Tensor  # (n-1,)
 
 
 @torch.no_grad()

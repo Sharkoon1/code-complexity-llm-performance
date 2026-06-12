@@ -1,7 +1,7 @@
 """Verfication of the LM-CC implementation to the paper's xCodeEval-APR numbers.
 
-model-free: cached entropies through our block-tree + features.
-with-model: recompute entropy with CodeLlama (needs LM_CC_MODEL=codellama/CodeLlama-7b-hf).
+model-free: cached entropies through block-tree + features.
+with-model: recompute entropy with CodeLlama
 """
 
 import argparse

@@ -64,6 +64,7 @@ Analysis notebooks live in `notebooks/`, one per agent and level (whole file and
 
 - SWE-bench Verified: `swe_bench_verified_sweagent_claude37_*`, `swe_bench_verified_openhands_qwen3coder_*`, `swe_bench_verified_all_agents`, and `swe_bench_verified_metrics_overview`
 - SWE-bench-Live: `swe_bench_live_sweagent_claude37_*`, `swe_bench_live_openhands_qwen3coder_*`, and `swe_bench_live_metrics_overview`
+- Cross-benchmark: `swe_bench_verified_vs_live` compares the LM-CC vs resolution relationship across both benchmarks for both agents
 
 ## References
 

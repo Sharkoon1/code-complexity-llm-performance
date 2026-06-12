@@ -15,7 +15,9 @@ def _build_filtered_dataset(tasks_path: Path) -> pd.DataFrame:
         raise
 
     filtered = filter_patches(annotate_patches(tasks))
-    logger.info(f"{len(filtered)}/{len(tasks)} tasks kept (single Python file, no new file).")
+    logger.info(
+        f"{len(filtered)}/{len(tasks)} tasks kept (single Python file, no new file)."
+    )
     return filtered
 
 
