@@ -1,10 +1,7 @@
-"""Subgroup correlation analysis"""
-
-import warnings
+"""Correlation analysis"""
 
 import numpy as np
 import pandas as pd
-import pingouin as pg
 from scipy.stats import norm, spearmanr
 
 
@@ -27,113 +24,52 @@ def partial_spearman(df: pd.DataFrame, x: str, y: str, z: str) -> tuple[float, f
     return partial_rho, 2 * (1 - norm.cdf(abs(z_stat)))
 
 
-def _group_by_metric(score, metric, loc, min_cnt):
-    order = np.argsort(metric)
-    score, metric = score[order], metric[order]
-    loc = None if loc is None else loc[order]
-    bounds = [(i, min(i + min_cnt, len(score))) for i in range(0, len(score), min_cnt)]
-    mean_score = np.array([np.nanmean(score[a:b]) for a, b in bounds])
-    median_metric = np.array([np.nanmedian(metric[a:b]) for a, b in bounds])
-    counts = np.array([b - a for a, b in bounds], dtype=int)
-    median_loc = (
-        None if loc is None else np.array([np.nanmedian(loc[a:b]) for a, b in bounds])
-    )
-    return mean_score, median_metric, median_loc, counts
-
-
-def _grouped_corr(score, metric, loc, min_cnt):
-    mean_score, median_metric, median_loc, counts = _group_by_metric(
-        score, metric, loc, min_cnt
-    )
-    valid = ~np.isnan(mean_score) & ~np.isnan(median_metric) & (counts >= min_cnt)
-    if median_loc is not None:
-        valid &= ~np.isnan(median_loc)
-    n_valid = int(valid.sum())
-    if n_valid < 2:
-        return np.nan, np.nan, n_valid
-
-    x, y = median_metric[valid], mean_score[valid]
-    if loc is None:
-        res = spearmanr(x, y)
-        return float(res.correlation), float(res.pvalue), n_valid
-
-    z = median_loc[valid]
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            out = pg.partial_corr(
-                data=pd.DataFrame({"m": x, "s": y, "l": z}),
-                x="m",
-                y="s",
-                covar="l",
-                method="spearman",
-            )
-        pcol = "p-val" if "p-val" in out.columns else "p_val"
-        return float(out["r"].iloc[0]), float(out[pcol].iloc[0]), n_valid
-    except Exception:
-        return np.nan, np.nan, n_valid
-
-
-def get_grouped_partial_corr(
-    score, metric, loc=None, *, group_range=(9, 11), alpha=0.05, negative_only=True
-) -> dict | None:
+def fixed_subgroup_corr(
+    score, metric, loc=None, *, group_range: tuple[int, int] = (9, 11)
+) -> tuple[float, float]:
     score = np.asarray(score, dtype=float)
     metric = np.asarray(metric, dtype=float)
-    loc = None if loc is None else np.asarray(loc, dtype=float)
     n = len(score)
-    lo_groups, hi_groups = group_range
+    low, high = group_range
+    if n < low:
+        return np.nan, np.nan
 
-    best = None
-    for min_cnt in range(max(1, n // 20), max(1, n // 8) + 1):
-        rho, p, groups = _grouped_corr(score, metric, loc, min_cnt)
-        if np.isnan(rho) or np.isnan(p) or not (lo_groups <= groups <= hi_groups):
-            continue
-        if p >= alpha or (negative_only and rho >= 0):
-            continue
-        if best is None or abs(rho) > abs(best["rho"]):
-            best = {"rho": rho, "p": p, "n_bins": groups, "min_cnt": min_cnt}
-    return best
+    order = np.argsort(metric)
+    score, metric = score[order], metric[order]
+    n_groups = min(range(low, high + 1), key=lambda count: (n % count, abs(count - 10)))
+    groups = np.array_split(np.arange(n), n_groups)
 
+    metric_median = np.array([np.median(metric[idx]) for idx in groups])
+    score_mean = np.array([np.mean(score[idx]) for idx in groups])
 
-def best_subgroup_result(
-    df: pd.DataFrame,
-    metric: str,
-    score: str,
-    control: str | None = None,
-    *,
-    alpha: float = 0.05,
-    negative_only: bool = True,
-) -> dict:
-    cols = [metric, score] + ([control] if control else [])
-    sub = df[cols].dropna()
-    loc = None if control is None else sub[control].to_numpy(dtype=float)
-    best = get_grouped_partial_corr(
-        sub[score].to_numpy(dtype=float),
-        sub[metric].to_numpy(dtype=float),
-        loc,
-        alpha=alpha,
-        negative_only=negative_only,
-    )
-    if best is None:
-        return {"rho": np.nan, "p": np.nan, "n_bins": None, "significant": False}
-    return {
-        "rho": best["rho"],
-        "p": best["p"],
-        "n_bins": best["n_bins"],
-        "significant": True,
-    }
+    if loc is None:
+        rho, p = spearmanr(metric_median, score_mean)
+        return float(rho), float(p)
+
+    loc = np.asarray(loc, dtype=float)[order]
+    loc_median = np.array([np.median(loc[idx]) for idx in groups])
+    rho_metric_score, _ = spearmanr(metric_median, score_mean)
+    rho_metric_loc, _ = spearmanr(metric_median, loc_median)
+    rho_score_loc, _ = spearmanr(score_mean, loc_median)
+    denom = np.sqrt((1 - rho_metric_loc**2) * (1 - rho_score_loc**2))
+    if denom == 0 or np.isnan(denom):
+        return np.nan, np.nan
+
+    partial_rho = (rho_metric_score - rho_metric_loc * rho_score_loc) / denom
+    if n_groups <= 4 or abs(partial_rho) >= 1.0:
+        return float(partial_rho), np.nan
+
+    z_stat = 0.5 * np.log((1 + partial_rho) / (1 - partial_rho)) * np.sqrt(n_groups - 4)
+    return float(partial_rho), float(2 * (1 - norm.cdf(abs(z_stat))))
 
 
-def _fmt_subgroup(result: dict) -> str:
-    if result["n_bins"] is None or np.isnan(result["rho"]):
+def _format_corr(rho: float, p: float, alpha: float) -> str:
+    if np.isnan(rho):
         return "—"
-    return f"{result['rho']:+.3f} (p={result['p']:.3f}, n={result['n_bins']})"
-
-
-def _fmt_sample(rho: float, p: float, alpha: float) -> str:
-    if np.isnan(rho) or np.isnan(p) or p >= alpha:
-        return "—"
-    return f"{rho:+.3f} (p={p:.3f})"
+    text = f"{rho:+.3f}"
+    if text in ("+0.000", "-0.000"):
+        text = "0.000"
+    return text + ("*" if (not np.isnan(p) and p < alpha) else "")
 
 
 def full_correlation_table(
@@ -144,40 +80,41 @@ def full_correlation_table(
     *,
     alpha: float = 0.05,
 ) -> pd.DataFrame:
-    """Per-metric correlations (sample + subgroup, zero-order + partial).
-
-    "—" means no significant result: p >= alpha, an undefined partial (metric
-    collinear with the control), or no significant-negative subgroup result.
-    """
+    """Per-metric correlations (sample + subgroup, zero-order + partial)."""
     rows = []
     for metric in metrics:
-        rho_s0, p_s0 = spearmanr(df[metric], df[score])
-        sample_zero = _fmt_sample(rho_s0, p_s0, alpha)
-
-        if metric == control:
-            sample_partial = "—"
-        else:
-            sample_partial = _fmt_sample(
-                *partial_spearman(df, metric, score, control), alpha
-            )
-
-        subgroup_zero = _fmt_subgroup(
-            best_subgroup_result(df, metric, score, control=None, alpha=alpha)
+        present = [col for col in (metric, score, control) if col in df.columns]
+        data = df.dropna(subset=present)
+        score_vals = data[score].to_numpy(dtype=float)
+        metric_vals = data[metric].to_numpy(dtype=float)
+        loc_vals = (
+            data[control].to_numpy(dtype=float) if control in data.columns else None
         )
-        if metric == control:
-            subgroup_partial = "—"
-        else:
-            subgroup_partial = _fmt_subgroup(
-                best_subgroup_result(df, metric, score, control=control, alpha=alpha)
-            )
+        is_control = metric == control
 
         rows.append(
             {
                 "metric": metric,
-                "sample_zero": sample_zero,
-                f"sample_partial_{control}": sample_partial,
-                "subgroup_zero": subgroup_zero,
-                f"subgroup_partial_{control}": subgroup_partial,
+                "sample_zero": _format_corr(
+                    *spearmanr(metric_vals, score_vals), alpha
+                ),
+                f"sample_partial_{control}": (
+                    "—"
+                    if is_control
+                    else _format_corr(
+                        *partial_spearman(data, metric, score, control), alpha
+                    )
+                ),
+                "subgroup_zero": _format_corr(
+                    *fixed_subgroup_corr(score_vals, metric_vals), alpha
+                ),
+                f"subgroup_partial_{control}": (
+                    "—"
+                    if is_control
+                    else _format_corr(
+                        *fixed_subgroup_corr(score_vals, metric_vals, loc_vals), alpha
+                    )
+                ),
             }
         )
 
@@ -199,18 +136,23 @@ def per_agent_correlation_table(
         group = group.dropna(subset=[metric, score, control])
         if len(group) < 30 or group[score].nunique() < 2:
             continue
-        rho_s0, _ = spearmanr(group[metric], group[score])
-        rho_sp, _ = partial_spearman(group, metric, score, control)
-        sub_zero = best_subgroup_result(group, metric, score, control=None)
-        sub_partial = best_subgroup_result(group, metric, score, control=control)
+        score_vals = group[score].to_numpy(dtype=float)
+        metric_vals = group[metric].to_numpy(dtype=float)
+        loc_vals = group[control].to_numpy(dtype=float)
+
+        sample_rho, _ = spearmanr(group[metric], group[score])
+        partial_rho, _ = partial_spearman(group, metric, score, control)
+        subgroup_rho, _ = fixed_subgroup_corr(score_vals, metric_vals)
+        subgroup_partial_rho, _ = fixed_subgroup_corr(score_vals, metric_vals, loc_vals)
+
         rows.append(
             {
                 "agent": agent,
                 "resolve_rate": group[score].mean(),
-                "sample_zero": rho_s0,
-                "sample_partial_loc": rho_sp,
-                "subgroup_zero": sub_zero["rho"],
-                "subgroup_partial_loc": sub_partial["rho"],
+                "sample_zero": sample_rho,
+                "sample_partial_loc": partial_rho,
+                "subgroup_zero": subgroup_rho,
+                "subgroup_partial_loc": subgroup_partial_rho,
             }
         )
 

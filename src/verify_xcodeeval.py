@@ -7,14 +7,15 @@ with-model: recompute entropy with CodeLlama
 import argparse
 import json
 
+import numpy as np
 import pandas as pd
-from scipy.stats import spearmanr
+from scipy.stats import norm, spearmanr
 from tqdm import tqdm
 
 from src.config import PATHS
 from src.block_tree import get_code_with_boundaries, CodeBlockProcessor
 from src.lm_cc import compute_lm_cc, _get_lmcc
-from src.correlation import partial_spearman, best_subgroup_result
+from src.correlation import partial_spearman
 
 DATA_DIR = PATHS.DATA / "verification" / "xcodeeval_apr"
 THRESHOLD = 0.67
@@ -29,21 +30,62 @@ def _tree_sig(node):
     return tuple(_tree_sig(child) for child in node.get("children", []))
 
 
-def _fmt(result):
-    if result["n_bins"] is None or pd.isna(result["rho"]):
+def _fmt(rho, p):
+    if pd.isna(rho):
         return "—"
-    return f"{result['rho']:+.3f} (p={result['p']:.4f}, {result['n_bins']} groups)"
+    return f"{rho:+.3f} (p={p:.4f})"
+
+
+def _best_subgroup(score, metric, loc=None, *, lo=9, hi=11, alpha=0.05):
+    """Paper binning: sweep the group size, drop the undersized last group, keep
+    9-11 groups, and take the strongest significant-negative subgroup correlation."""
+    order = np.argsort(metric)
+    score = np.asarray(score, dtype=float)[order]
+    metric = np.asarray(metric, dtype=float)[order]
+    loc = None if loc is None else np.asarray(loc, dtype=float)[order]
+    n = len(score)
+    best = (np.nan, np.nan)
+    for min_cnt in range(max(1, n // 20), max(1, n // 8) + 1):
+        bounds = [(i, min(i + min_cnt, n)) for i in range(0, n, min_cnt)]
+        valid = np.array([b - a for a, b in bounds]) >= min_cnt
+        g = int(valid.sum())
+        if not (lo <= g <= hi):
+            continue
+        xm = np.array([np.median(metric[a:b]) for a, b in bounds])[valid]
+        ym = np.array([np.mean(score[a:b]) for a, b in bounds])[valid]
+        if loc is None:
+            rho, p = spearmanr(xm, ym)
+        else:
+            zm = np.array([np.median(loc[a:b]) for a, b in bounds])[valid]
+            rxy, rxz, ryz = (
+                spearmanr(xm, ym)[0], spearmanr(xm, zm)[0], spearmanr(ym, zm)[0]
+            )
+            denom = np.sqrt((1 - rxz**2) * (1 - ryz**2))
+            if denom == 0 or np.isnan(denom):
+                continue
+            rho = (rxy - rxz * ryz) / denom
+            z = 0.5 * np.log((1 + rho) / (1 - rho)) * np.sqrt(g - 4)
+            p = 2 * (1 - norm.cdf(abs(z))) if g > 4 and abs(rho) < 1 else np.nan
+        if np.isnan(rho) or rho >= 0 or (not np.isnan(p) and p >= alpha):
+            continue
+        if np.isnan(best[0]) or abs(rho) > abs(best[0]):
+            best = (rho, p)
+    return best
 
 
 def _report_correlation(df):
     rho0, p0 = spearmanr(df["lm_cc"], df["pass1"])
     rhop, pp = partial_spearman(df, "lm_cc", "pass1", "loc")
-    sub0 = best_subgroup_result(df, "lm_cc", "pass1", control=None)
-    subp = best_subgroup_result(df, "lm_cc", "pass1", control="loc")
+    s = df["pass1"].to_numpy(dtype=float)
+    m = df["lm_cc"].to_numpy(dtype=float)
+    loc = df["loc"].to_numpy(dtype=float)
     print(
         f"  sample   zero {rho0:+.3f} (p={p0:.3f}), partial|loc {rhop:+.3f} (p={pp:.3f})"
     )
-    print(f"  subgroup zero {_fmt(sub0)}, partial|loc {_fmt(subp)}")
+    print(
+        f"  subgroup zero {_fmt(*_best_subgroup(s, m))}, "
+        f"partial|loc {_fmt(*_best_subgroup(s, m, loc))}"
+    )
 
 
 def verify_model_free():
