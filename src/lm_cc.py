@@ -169,6 +169,51 @@ def _get_lmcc(tree_node) -> float:
     return depth_sum * (1 - ALPHA) + total_branch * ALPHA
 
 
+def _units_at_depth(node, target, depth=1):
+    found = [node] if depth == target else []
+    for child in node.get("children", []):
+        found += _units_at_depth(child, target, depth + 1)
+    return found
+
+
+def _deepest_unit_entropy(tree_node, entropies) -> float:
+    deepest = _units_at_depth(tree_node, _get_max_depth(tree_node))
+    values = [
+        e
+        for node in deepest
+        for e in entropies[node["start_token"] : node["end_token"] + 1]
+    ]
+    return float(sum(values) / len(values)) if values else 0.0
+
+
+def _mean_entropy(entropies) -> float:
+    return float(sum(entropies) / len(entropies)) if entropies else 0.0
+
+
+def _high_entropy_fraction(entropies) -> float:
+    if not entropies:
+        return 0.0
+    return sum(1 for e in entropies if e >= _THRESHOLD) / len(entropies)
+
+
+def _unit_mean_entropy(node, entropies) -> float:
+    values = entropies[node["start_token"] : node["end_token"] + 1]
+    return sum(values) / len(values) if values else 0.0
+
+
+def _depth_weighted_entropy(tree_node, entropies) -> float:
+    weighted = 0.0
+    weight = 0
+    stack = [(tree_node, 1)]
+    while stack:
+        node, depth = stack.pop()
+        weighted += depth * _unit_mean_entropy(node, entropies)
+        weight += depth
+        for child in node.get("children", []):
+            stack.append((child, depth + 1))
+    return float(weighted / weight) if weight else 0.0
+
+
 def _zero_metrics() -> dict:
     return {
         "lm_cc_score": 0.0,
@@ -178,6 +223,10 @@ def _zero_metrics() -> dict:
         "lm_cc_avg_comp": 0.0,
         "lm_cc_max_branch": 0,
         "lm_cc_avg_branch": 0.0,
+        "deepest_unit_entropy": 0.0,
+        "mean_entropy": 0.0,
+        "high_entropy_fraction": 0.0,
+        "depth_weighted_entropy": 0.0,
     }
 
 
@@ -211,4 +260,9 @@ def compute_lm_cc(code: str) -> dict:
     block_tree = CodeBlockProcessor().parse_code_blocks(
         code_with_boundaries, tokens=token_strings, start_end_tokens=start_end_tokens
     )
-    return _metrics_from_tree(block_tree)
+    metrics = _metrics_from_tree(block_tree)
+    metrics["deepest_unit_entropy"] = _deepest_unit_entropy(block_tree, entropies)
+    metrics["mean_entropy"] = _mean_entropy(entropies)
+    metrics["high_entropy_fraction"] = _high_entropy_fraction(entropies)
+    metrics["depth_weighted_entropy"] = _depth_weighted_entropy(block_tree, entropies)
+    return metrics
