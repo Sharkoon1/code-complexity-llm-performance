@@ -3,6 +3,7 @@
 import logging
 import os
 import tempfile
+import time
 
 import networkx as nx
 from scalpel.SSA.const import SSA
@@ -80,11 +81,24 @@ def _build_call_graph(code: str) -> nx.DiGraph:
 
 
 def _call_graph_metrics(code: str) -> dict:
+    n_lines = code.count("\n") + 1
+    logger.info(f"call graph: analyzing {n_lines} lines with PyCG ...")
+    start = time.perf_counter()
     try:
-        return _metrics_from_call_graph(_build_call_graph(code))
+        metrics = _metrics_from_call_graph(_build_call_graph(code))
     except Exception as e:
-        logger.warning(f"call graph metrics failed: {type(e).__name__}: {e}")
+        logger.warning(
+            f"call graph FAILED after {time.perf_counter() - start:.0f}s "
+            f"({n_lines} lines): {type(e).__name__}: {e}"
+        )
         return _zero_call_graph_metrics()
+    elapsed = time.perf_counter() - start
+    if elapsed > 1:
+        logger.info(
+            f"call graph: done in {elapsed:.0f}s "
+            f"({metrics['cg_n_nodes']} nodes, {metrics['cg_n_edges']} edges)"
+        )
+    return metrics
 
 
 def _zero_data_metrics() -> dict:
@@ -311,11 +325,19 @@ def _build_pdg(code: str, scope_names: set = None) -> nx.DiGraph:
 
 
 def _pdg_metrics(code: str) -> dict:
+    start = time.perf_counter()
     try:
-        return _metrics_from_pdg(_build_pdg(code))
+        metrics = _metrics_from_pdg(_build_pdg(code))
     except Exception as e:
-        logger.warning(f"program dependence metrics failed: {type(e).__name__}: {e}")
+        logger.warning(
+            f"program dependence graph FAILED after {time.perf_counter() - start:.0f}s: "
+            f"{type(e).__name__}: {e}"
+        )
         return _zero_pdg_metrics()
+    elapsed = time.perf_counter() - start
+    if elapsed > 1:
+        logger.info(f"program dependence graph: done in {elapsed:.0f}s")
+    return metrics
 
 
 def compute_graph_metrics(code: str) -> dict:

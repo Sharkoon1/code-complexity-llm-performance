@@ -1,6 +1,6 @@
 # Code Complexity and LLM Performance
 
-Bachelor's thesis investigating whether code complexity metrics predict LLM performance on real-world software engineering tasks. Compares classical metrics (cyclomatic, Halstead, LOC) and LM-CC against whether an agent resolves the task.
+Bachelor's thesis investigating whether code complexity metrics predict LLM performance on real-world software engineering tasks. Compares classical metrics (Cyclomatic, Halstead, LOC), LM-CC, and graph-based metrics (call graph and program dependence graph) against whether an agent resolves the task.
 
 ## Datasets
 
@@ -19,12 +19,13 @@ Metrics are computed once per benchmark.
 
 For each task:
 1. Extract the target Python file and the patched function from the task repository at its base commit
-2. Compute complexity metrics (cyclomatic, Halstead, LOC, LM-CC) at both file and function level
+2. Compute complexity metrics (cyclomatic, Halstead, LOC, LM-CC) and graph metrics (call graph, program dependence graph) at both file and function level
 3. Join each agent's resolved labels
 4. Correlate metric values with task success and difficulty
 
 [LM-CC](src/lm_cc.py) follows [Xie et al., 2026](https://arxiv.org/abs/2602.07882): entropy-based segmentation via a code language model, tree-sitter hierarchical decomposition, aggregation over depth and branching factor.
 
+[Graphs](src/graphs.py) uses [Scalpel](https://github.com/SMAT-Lab/Scalpel): a libary for static code analysis and [PyCG](https://arxiv.org/pdf/2103.00587): a libary for call graph generation. 
 ## Setup
 
 ```bash

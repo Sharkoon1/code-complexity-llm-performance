@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 def metrics_for_code(code: str) -> dict:
-    """All complexity metrics (classical + LM-CC) for a single code string."""
+    """All complexity metrics (classical + LM-CC + graph) for a single code string."""
     return {
         **_compute_cyclomatic(code),
         **_compute_halstead(code),
@@ -29,6 +29,7 @@ def metrics_for_code(code: str) -> dict:
         **_compute_function_count(code),
         **_compute_branches(code),
         **compute_lm_cc(code),
+        **compute_graph_metrics(code),
     }
 
 
@@ -48,13 +49,7 @@ def compute_whole_file_metrics(filtered_dataset: pd.DataFrame) -> pd.DataFrame:
             code = normalize(raw_code)
             if code is None:
                 raise ValueError("preprocessing (black) failed")
-            metrics.update(
-                {
-                    "parsable": True,
-                    **metrics_for_code(code),
-                    **compute_graph_metrics(code),
-                }
-            )
+            metrics.update({"parsable": True, **metrics_for_code(code)})
         except Exception as e:
             logger.error(f"Error computing metrics for {row['instance_id']}: {e}")
             metrics["parsable"] = False
