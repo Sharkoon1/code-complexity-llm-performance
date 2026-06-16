@@ -36,7 +36,30 @@ LM_CC_FEATURES = [
     "lm_cc_total_branch",
 ]
 LM_CC = ["lm_cc_score"]
-ALL_METRICS = CLASSICAL + LM_CC_FEATURES + LM_CC
+GRAPH = [
+    "cg_n_nodes",
+    "cg_n_edges",
+    "cg_max_out_degree",
+    "cg_longest_chain",
+    "cg_density",
+    "cg_n_cycles",
+    "pdg_longest_chain",
+    "pdg_max_defuse_distance",
+    "pdg_density",
+    "pdg_max_fan_in",
+    "pdg_max_fan_out",
+    "pdg_mean_degree",
+    "pdg_slice_mean",
+    "pdg_slice_max",
+    "pdg_n_cycles",
+    "pdg_control_data_ratio",
+    "pdg_control_span_max",
+    "pdg_control_span_mean",
+    "pdg_unconditional_fraction",
+    "pdg_n_control_regions",
+    "pdg_control_betweenness_max",
+]
+ALL_METRICS = CLASSICAL + LM_CC_FEATURES + LM_CC + GRAPH
 LONG_METRIC_COLS = ["lm_cc_score", "loc", "cc_sum", "halstead_volume", "nesting_max"]
 
 

@@ -6,6 +6,7 @@ import io
 from dataclasses import dataclass
 from src.config import PATHS
 from src.shared import cache_path
+from src.graphs import compute_graph_metrics
 from src.lm_cc import compute_lm_cc
 from src.preprocess import normalize
 from src.patches import extract_patched_functions
@@ -47,7 +48,13 @@ def compute_whole_file_metrics(filtered_dataset: pd.DataFrame) -> pd.DataFrame:
             code = normalize(raw_code)
             if code is None:
                 raise ValueError("preprocessing (black) failed")
-            metrics.update({"parsable": True, **metrics_for_code(code)})
+            metrics.update(
+                {
+                    "parsable": True,
+                    **metrics_for_code(code),
+                    **compute_graph_metrics(code),
+                }
+            )
         except Exception as e:
             logger.error(f"Error computing metrics for {row['instance_id']}: {e}")
             metrics["parsable"] = False

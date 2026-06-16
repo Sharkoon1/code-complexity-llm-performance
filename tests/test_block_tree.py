@@ -1,4 +1,4 @@
-"""Tests for the semantic block-tree construction (src/block_tree.py)."""
+"""Tests for the semantic block-tree construction."""
 
 import pytest
 
@@ -36,14 +36,12 @@ class TestSegmentationHierarchy:
         ]
         ents = [0.0, 0.9, 0.1, 0.1, 0.1, 0.8, 0.1, 0.1, 0.1, 0.9, 0.1, 0.1]
         bt = self._build(toks, ents)
-        # the if-block absorbs the interior boundary and keeps y=1 nested
-        # (root=1, if=2, y=3); z=2 stays a sibling of the if-block
         assert _get_max_depth(bt) == 3
-        assert _get_total_branch(bt) == 3  # root, if, y, z -> N-1
+        assert _get_total_branch(bt) == 3
 
     def test_no_boundaries_single_block(self):
         toks = ["▁a", "▁=", "▁1"]
         ents = [0.0, 0.0, 0.0]
         bt = self._build(toks, ents)
         assert _get_total_branch(bt) == 0
-        assert _get_lmcc(bt) == pytest.approx(0.2)  # root-only tree (depth 1)
+        assert _get_lmcc(bt) == pytest.approx(0.2)

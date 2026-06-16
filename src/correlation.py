@@ -95,9 +95,7 @@ def full_correlation_table(
         rows.append(
             {
                 "metric": metric,
-                "sample_zero": _format_corr(
-                    *spearmanr(metric_vals, score_vals), alpha
-                ),
+                "sample_zero": _format_corr(*spearmanr(metric_vals, score_vals), alpha),
                 f"sample_partial_{control}": (
                     "—"
                     if is_control

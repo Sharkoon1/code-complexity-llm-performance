@@ -1,4 +1,4 @@
-"""Tests for the shared source preprocessing (src/preprocess.py)."""
+"""Tests for the source preprocessing."""
 
 import shutil
 

@@ -1,6 +1,6 @@
-"""Verfication of the LM-CC implementation to the paper's xCodeEval-APR numbers.
+"""Verfication of the LM-CC implementation to the papers xCodeEval-APR numbers.
 
-model-free: cached entropies through block-tree + features.
+model-free: cached entropies through block-tree and features.
 with-model: recompute entropy with CodeLlama
 """
 
@@ -26,7 +26,6 @@ def _loc(code):
 
 
 def _tree_sig(node):
-    """Child-count shape of the tree"""
     return tuple(_tree_sig(child) for child in node.get("children", []))
 
 
@@ -37,8 +36,6 @@ def _fmt(rho, p):
 
 
 def _best_subgroup(score, metric, loc=None, *, lo=9, hi=11, alpha=0.05):
-    """Paper binning: sweep the group size, drop the undersized last group, keep
-    9-11 groups, and take the strongest significant-negative subgroup correlation."""
     order = np.argsort(metric)
     score = np.asarray(score, dtype=float)[order]
     metric = np.asarray(metric, dtype=float)[order]
@@ -58,7 +55,9 @@ def _best_subgroup(score, metric, loc=None, *, lo=9, hi=11, alpha=0.05):
         else:
             zm = np.array([np.median(loc[a:b]) for a, b in bounds])[valid]
             rxy, rxz, ryz = (
-                spearmanr(xm, ym)[0], spearmanr(xm, zm)[0], spearmanr(ym, zm)[0]
+                spearmanr(xm, ym)[0],
+                spearmanr(xm, zm)[0],
+                spearmanr(ym, zm)[0],
             )
             denom = np.sqrt((1 - rxz**2) * (1 - ryz**2))
             if denom == 0 or np.isnan(denom):
