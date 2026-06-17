@@ -14,7 +14,39 @@ from scalpel.cfg import CFGBuilder
 
 logger = logging.getLogger(__name__)
 
-_CALL_GRAPH_TIMEOUT = int(os.environ.get("GRAPH_CALL_TIMEOUT", "300"))
+_CALL_GRAPH_TIMEOUT = int(os.environ.get("GRAPH_CALL_TIMEOUT", "600"))
+_CALL_GRAPH_POLL = 30
+
+
+def _patch_pycg() -> None:
+    try:
+        from pycg.processing.preprocessor import PreProcessor
+
+        def _get_fun_defaults(self, node):
+            defaults = {}
+            pos = node.args.posonlyargs + node.args.args
+            start = len(pos) - len(node.args.defaults)
+            for cnt, d in enumerate(node.args.defaults, start=start):
+                if not d:
+                    continue
+                self.visit(d)
+                if 0 <= cnt < len(pos):
+                    defaults[pos[cnt].arg] = self.decode_node(d)
+            start = len(node.args.kwonlyargs) - len(node.args.kw_defaults)
+            for cnt, d in enumerate(node.args.kw_defaults, start=start):
+                if not d:
+                    continue
+                self.visit(d)
+                if 0 <= cnt < len(node.args.kwonlyargs):
+                    defaults[node.args.kwonlyargs[cnt].arg] = self.decode_node(d)
+            return defaults
+
+        PreProcessor._get_fun_defaults = _get_fun_defaults
+    except Exception as e:
+        logger.warning(f"could not patch PyCG _get_fun_defaults: {type(e).__name__}: {e}")
+
+
+_patch_pycg()
 
 
 def _longest_chain(graph: nx.DiGraph) -> int:
@@ -100,19 +132,28 @@ def _call_graph_metrics(code: str) -> dict:
     out_queue = ctx.Queue()
     proc = ctx.Process(target=_call_graph_worker, args=(code, out_queue), daemon=True)
     proc.start()
-    try:
-        status, payload = out_queue.get(timeout=_CALL_GRAPH_TIMEOUT)
-    except Empty:
-        proc.terminate()
-        proc.join()
-        logger.warning(
-            f"call graph TIMED OUT after {_CALL_GRAPH_TIMEOUT}s ({n_lines} lines); using zeros"
-        )
-        return _zero_call_graph_metrics()
-    finally:
-        proc.join(timeout=5)
-        if proc.is_alive():
-            proc.terminate()
+
+    while True:
+        try:
+            status, payload = out_queue.get(timeout=_CALL_GRAPH_POLL)
+            break
+        except Empty:
+            waited = time.perf_counter() - start
+            if not proc.is_alive():
+                status, payload = "err", "worker exited without a result"
+                break
+            if waited >= _CALL_GRAPH_TIMEOUT:
+                proc.kill()
+                proc.join()
+                logger.warning(
+                    f"call graph TIMED OUT after {waited:.0f}s ({n_lines} lines); using zeros"
+                )
+                return _zero_call_graph_metrics()
+            logger.info(f"call graph: still running ({n_lines} lines, {waited:.0f}s) ...")
+
+    proc.join(timeout=5)
+    if proc.is_alive():
+        proc.kill()
 
     if status == "err":
         logger.warning(f"call graph FAILED ({n_lines} lines): {payload}")
