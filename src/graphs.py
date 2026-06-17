@@ -1,9 +1,11 @@
 """Scalpel call graph and program dependence graph."""
 
 import logging
+import multiprocessing as mp
 import os
 import tempfile
 import time
+from queue import Empty
 
 import networkx as nx
 from scalpel.SSA.const import SSA
@@ -11,6 +13,8 @@ from scalpel.call_graph.pycg import CallGraphGenerator
 from scalpel.cfg import CFGBuilder
 
 logger = logging.getLogger(__name__)
+
+_CALL_GRAPH_TIMEOUT = int(os.environ.get("GRAPH_CALL_TIMEOUT", "300"))
 
 
 def _longest_chain(graph: nx.DiGraph) -> int:
@@ -80,25 +84,47 @@ def _build_call_graph(code: str) -> nx.DiGraph:
     return graph
 
 
+def _call_graph_worker(code: str, out_queue) -> None:
+    try:
+        out_queue.put(("ok", _metrics_from_call_graph(_build_call_graph(code))))
+    except Exception as e:
+        out_queue.put(("err", f"{type(e).__name__}: {e}"))
+
+
 def _call_graph_metrics(code: str) -> dict:
     n_lines = code.count("\n") + 1
     logger.info(f"call graph: analyzing {n_lines} lines with PyCG ...")
     start = time.perf_counter()
+
+    ctx = mp.get_context("fork")
+    out_queue = ctx.Queue()
+    proc = ctx.Process(target=_call_graph_worker, args=(code, out_queue), daemon=True)
+    proc.start()
     try:
-        metrics = _metrics_from_call_graph(_build_call_graph(code))
-    except Exception as e:
+        status, payload = out_queue.get(timeout=_CALL_GRAPH_TIMEOUT)
+    except Empty:
+        proc.terminate()
+        proc.join()
         logger.warning(
-            f"call graph FAILED after {time.perf_counter() - start:.0f}s "
-            f"({n_lines} lines): {type(e).__name__}: {e}"
+            f"call graph TIMED OUT after {_CALL_GRAPH_TIMEOUT}s ({n_lines} lines); using zeros"
         )
         return _zero_call_graph_metrics()
+    finally:
+        proc.join(timeout=5)
+        if proc.is_alive():
+            proc.terminate()
+
+    if status == "err":
+        logger.warning(f"call graph FAILED ({n_lines} lines): {payload}")
+        return _zero_call_graph_metrics()
+
     elapsed = time.perf_counter() - start
     if elapsed > 1:
         logger.info(
             f"call graph: done in {elapsed:.0f}s "
-            f"({metrics['cg_n_nodes']} nodes, {metrics['cg_n_edges']} edges)"
+            f"({payload['cg_n_nodes']} nodes, {payload['cg_n_edges']} edges)"
         )
-    return metrics
+    return payload
 
 
 def _zero_data_metrics() -> dict:

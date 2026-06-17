@@ -11,8 +11,9 @@ from src.lm_cc import compute_lm_cc
 from src.preprocess import normalize
 from src.patches import extract_patched_functions
 from radon.complexity import cc_visit
-from radon.metrics import h_visit
+from radon.metrics import h_visit, mi_visit
 from radon.raw import analyze
+from complexipy import code_complexity
 from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,8 @@ def metrics_for_code(code: str) -> dict:
     """All complexity metrics (classical + LM-CC + graph) for a single code string."""
     return {
         **_compute_cyclomatic(code),
+        **_compute_cognitive(code),
+        **_compute_maintainability(code),
         **_compute_halstead(code),
         **_compute_loc(code),
         **_compute_nesting(code),
@@ -114,6 +117,23 @@ def _compute_cyclomatic(code: str) -> dict:
         "cc_sum": sum(complexities),
     }
 
+
+def _compute_cognitive(code: str) -> dict:
+    result = code_complexity(code)
+    per_function = [f.complexity for f in result.functions]
+
+    if not per_function:
+        return {"cognitive_avg": 0, "cognitive_max": 0, "cognitive_sum": result.complexity}
+
+    return {
+        "cognitive_avg": sum(per_function) / len(per_function),
+        "cognitive_max": max(per_function),
+        "cognitive_sum": result.complexity,
+    }
+
+
+def _compute_maintainability(code: str) -> dict:
+    return {"maintainability_index": mi_visit(code, True)}
 
 def _compute_halstead(code: str) -> dict:
     h = h_visit(code).total
