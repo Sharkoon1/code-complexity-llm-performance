@@ -15,7 +15,7 @@ from tqdm import tqdm
 from src.config import PATHS
 from src.block_tree import get_code_with_boundaries, CodeBlockProcessor
 from src.lm_cc import compute_lm_cc, _get_lmcc
-from src.correlation import partial_spearman
+from src.analysis.correlation import partial_spearman
 
 DATA_DIR = PATHS.DATA / "verification" / "xcodeeval_apr"
 THRESHOLD = 0.67

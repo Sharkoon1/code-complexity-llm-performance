@@ -5,11 +5,21 @@ import pandas as pd
 from scipy.stats import norm, spearmanr
 
 
+def _spearman(a, b) -> tuple[float, float]:
+    """Spearman that returns NaN for constant input instead of warning."""
+    a = np.asarray(a, dtype=float)
+    b = np.asarray(b, dtype=float)
+    if len(a) < 2 or np.ptp(a) == 0 or np.ptp(b) == 0:
+        return np.nan, np.nan
+    rho, p = spearmanr(a, b)
+    return float(rho), float(p)
+
+
 def partial_spearman(df: pd.DataFrame, x: str, y: str, z: str) -> tuple[float, float]:
     """Partial Spearman of x vs y given z, p-value via Fisher z."""
-    rho_xy, _ = spearmanr(df[x], df[y])
-    rho_xz, _ = spearmanr(df[x], df[z])
-    rho_yz, _ = spearmanr(df[y], df[z])
+    rho_xy, _ = _spearman(df[x], df[y])
+    rho_xz, _ = _spearman(df[x], df[z])
+    rho_yz, _ = _spearman(df[y], df[z])
 
     denom = np.sqrt((1 - rho_xz**2) * (1 - rho_yz**2))
     if denom == 0 or np.isnan(denom):
@@ -43,14 +53,13 @@ def fixed_subgroup_corr(
     score_mean = np.array([np.mean(score[idx]) for idx in groups])
 
     if loc is None:
-        rho, p = spearmanr(metric_median, score_mean)
-        return float(rho), float(p)
+        return _spearman(metric_median, score_mean)
 
     loc = np.asarray(loc, dtype=float)[order]
     loc_median = np.array([np.median(loc[idx]) for idx in groups])
-    rho_metric_score, _ = spearmanr(metric_median, score_mean)
-    rho_metric_loc, _ = spearmanr(metric_median, loc_median)
-    rho_score_loc, _ = spearmanr(score_mean, loc_median)
+    rho_metric_score, _ = _spearman(metric_median, score_mean)
+    rho_metric_loc, _ = _spearman(metric_median, loc_median)
+    rho_score_loc, _ = _spearman(score_mean, loc_median)
     denom = np.sqrt((1 - rho_metric_loc**2) * (1 - rho_score_loc**2))
     if denom == 0 or np.isnan(denom):
         return np.nan, np.nan
@@ -65,7 +74,7 @@ def fixed_subgroup_corr(
 
 def _format_corr(rho: float, p: float, alpha: float) -> str:
     if np.isnan(rho):
-        return "—"
+        return "-"
     text = f"{rho:+.3f}"
     if text in ("+0.000", "-0.000"):
         text = "0.000"
@@ -95,9 +104,9 @@ def full_correlation_table(
         rows.append(
             {
                 "metric": metric,
-                "sample_zero": _format_corr(*spearmanr(metric_vals, score_vals), alpha),
+                "sample_zero": _format_corr(*_spearman(metric_vals, score_vals), alpha),
                 f"sample_partial_{control}": (
-                    "—"
+                    "-"
                     if is_control
                     else _format_corr(
                         *partial_spearman(data, metric, score, control), alpha
@@ -107,7 +116,7 @@ def full_correlation_table(
                     *fixed_subgroup_corr(score_vals, metric_vals), alpha
                 ),
                 f"subgroup_partial_{control}": (
-                    "—"
+                    "-"
                     if is_control
                     else _format_corr(
                         *fixed_subgroup_corr(score_vals, metric_vals, loc_vals), alpha
@@ -138,7 +147,7 @@ def per_agent_correlation_table(
         metric_vals = group[metric].to_numpy(dtype=float)
         loc_vals = group[control].to_numpy(dtype=float)
 
-        sample_rho, _ = spearmanr(group[metric], group[score])
+        sample_rho, _ = _spearman(group[metric], group[score])
         partial_rho, _ = partial_spearman(group, metric, score, control)
         subgroup_rho, _ = fixed_subgroup_corr(score_vals, metric_vals)
         subgroup_partial_rho, _ = fixed_subgroup_corr(score_vals, metric_vals, loc_vals)

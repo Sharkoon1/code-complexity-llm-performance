@@ -12,7 +12,7 @@ from src.graphs import (
     _n_cycles,
     program_dependence_graph,
 )
-from src.render_graphs import _function_subgraph, render_call_graph, render_pdg
+from scripts.render_graphs import _function_subgraph, render_call_graph, render_pdg
 
 
 def _chain(n: int) -> nx.DiGraph:

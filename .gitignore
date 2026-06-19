@@ -16,3 +16,6 @@ env/
 
 # Logs
 logs/
+
+# Graphs
+figs/

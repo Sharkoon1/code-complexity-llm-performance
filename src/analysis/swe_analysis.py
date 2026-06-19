@@ -1,11 +1,14 @@
 """Analysis helpers shared by the SWE-bench result notebooks."""
 
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import pandas as pd
 from scipy.stats import kruskal, mannwhitneyu, spearmanr
 
 from src.config import PATHS
-from src.correlation import (
+from src.analysis.correlation import (
+    _spearman,
     full_correlation_table,
     partial_spearman,
     per_agent_correlation_table,
@@ -67,11 +70,25 @@ ALL_METRICS = CLASSICAL + LM_CC_FEATURES + LM_CC + GRAPH
 LONG_METRIC_COLS = ["lm_cc_score", "loc", "cc_sum", "halstead_volume", "nesting_max"]
 
 
+def _graph_failed(df: pd.DataFrame) -> pd.Series:
+    needed = {"cg_n_nodes", "pdg_unconditional_fraction", "n_functions"}
+    if not needed <= set(df.columns):
+        return pd.Series(False, index=df.index)
+    return (
+        (df["cg_n_nodes"].fillna(0) == 0)
+        | (df["pdg_unconditional_fraction"].fillna(0) == 0)
+    ) & (df["n_functions"].fillna(0) > 0)
+
+
 def load_metrics(result_path, labels_path=None):
     df = pd.read_parquet(result_path)
     mask = df["parsable"].fillna(False) & df["lm_cc_score"].notna()
     if "has_patched_function" in df.columns:
         mask &= df["has_patched_function"].fillna(False)
+
+    failed = _graph_failed(df)
+    mask &= ~failed
+
     clean = df[mask].copy()
     if labels_path is not None:
         labels = pd.read_parquet(labels_path)[["instance_id", "resolved"]]
@@ -124,15 +141,20 @@ def collinearity(clean):
         "lm_cc_total_comp",
         "lm_cc_total_branch",
         "cc_sum",
+        "cognitive_sum",
+        "maintainability_index",
         "halstead_volume",
         "lloc",
         "nesting_max",
         "n_branches",
+        *GRAPH,
     ]
-    print(f"{'Metric':<22} {'rho with LOC':>12}")
+    print(f"{'Metric':<30} {'rho with LOC':>12}")
     for m in metrics:
         if m in clean.columns:
-            print(f"{m:<22} {spearmanr(clean[m], clean['loc']).correlation:>+12.3f}")
+            rho, _ = _spearman(clean[m], clean["loc"])
+            shown = f"{rho:>+12.3f}" if not pd.isna(rho) else f"{'-':>12}"
+            print(f"{m:<30} {shown}")
 
 
 def descriptive(clean):

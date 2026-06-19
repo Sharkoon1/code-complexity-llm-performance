@@ -13,7 +13,7 @@ run-swe-bench-live:
 	uv run run_swe_bench_live.py
 
 verify:
-	uv run python -m src.verify_xcodeeval --mode model-free
+	uv run python -m scripts.verify_xcodeeval --mode model-free
 
 verify-model:
-	uv run python -m src.verify_xcodeeval --mode with-model
+	uv run python -m scripts.verify_xcodeeval --mode with-model
