@@ -2,9 +2,12 @@
 
 import pytest
 
-from src.block_tree import get_code_with_boundaries, CodeBlockProcessor
-from src.tree_sitter_config import py_parser
-from src.lm_cc import _get_lmcc, _get_total_branch, _get_max_depth
+pytest.importorskip("torch")  # LM-CC extra
+pytest.importorskip("tree_sitter")
+
+from code_complexity.block_tree import get_code_with_boundaries, CodeBlockProcessor
+from code_complexity.tree_sitter_config import py_parser
+from code_complexity.lm_cc import _get_lmcc, _get_total_branch, _get_max_depth
 
 
 class TestTreeSitter:

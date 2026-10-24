@@ -1,0 +1,2 @@
+# Intentionally empty. Passed to black as --config so that black uses its defaults and does
+# not pick up a project or user configuration; the metrics must not depend on the machine.

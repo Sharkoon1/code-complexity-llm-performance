@@ -2,7 +2,7 @@
 
 from tree_sitter import Node
 
-from src.tree_sitter_config import py_parser
+from code_complexity.tree_sitter_config import py_parser
 
 
 def _get_line_indent(line_code: str) -> int:

@@ -6,15 +6,15 @@ import graphviz
 import networkx as nx
 import pandas as pd
 
-from src.config import PATHS
-from src.graphs import (
+from code_complexity.config import PATHS
+from code_complexity.graphs import (
     _metrics_from_call_graph,
     _metrics_from_pdg,
     call_graph,
     program_dependence_graph,
 )
-from src.preprocess import normalize
-from src.shared import cache_path
+from code_complexity.preprocess import normalize
+from code_complexity.shared import cache_path
 
 logger = logging.getLogger(__name__)
 

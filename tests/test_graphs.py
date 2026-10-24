@@ -4,7 +4,7 @@ import graphviz
 import networkx as nx
 import pytest
 
-from src.graphs import (
+from code_complexity.graphs import (
     _control_metrics,
     _data_metrics,
     _longest_chain,

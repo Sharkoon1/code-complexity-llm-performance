@@ -1,8 +1,8 @@
 import pandas as pd
 import logging
 from pathlib import Path
-from src.config import PATHS
-from src.patches import annotate_patches, filter_patches
+from code_complexity.config import PATHS
+from code_complexity.patches import annotate_patches, filter_patches
 
 logger = logging.getLogger(__name__)
 

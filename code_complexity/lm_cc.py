@@ -9,7 +9,7 @@ import torch
 import torch.nn.functional as F
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-from src.block_tree import CodeBlockProcessor, get_code_with_boundaries
+from code_complexity.block_tree import CodeBlockProcessor, get_code_with_boundaries
 
 logger = logging.getLogger(__name__)
 

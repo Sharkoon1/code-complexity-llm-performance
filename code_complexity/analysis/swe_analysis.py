@@ -8,8 +8,8 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from scipy.stats import kruskal, mannwhitneyu, spearmanr
 
-from src.config import PATHS
-from src.analysis.correlation import (
+from code_complexity.config import PATHS
+from code_complexity.analysis.correlation import (
     _spearman,
     fixed_subgroup_corr,
     full_correlation_table,

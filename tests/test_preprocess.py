@@ -1,16 +1,16 @@
 """Tests for the source preprocessing."""
 
-import shutil
+import importlib.util
 
 import pytest
 
-from src.preprocess import (
+from code_complexity.preprocess import (
     _remove_comments_and_docstrings,
     _format_python_code,
     normalize,
 )
 
-HAS_BLACK = shutil.which("black") is not None
+HAS_BLACK = importlib.util.find_spec("black") is not None
 
 
 class TestRemoveCommentsDocstrings:
@@ -31,7 +31,7 @@ class TestRemoveCommentsDocstrings:
         assert "not a # comment" in out
 
 
-@pytest.mark.skipif(not HAS_BLACK, reason="black CLI not on PATH")
+@pytest.mark.skipif(not HAS_BLACK, reason="black not installed")
 class TestFormatAndNormalize:
     def test_black_formats(self):
         out = _format_python_code("def f( x ):\n  return  x+1\n")

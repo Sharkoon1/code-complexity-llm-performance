@@ -1,10 +1,10 @@
 from datasets import load_dataset
 import requests
 import pandas as pd
-from src.config import PATHS
+from code_complexity.config import PATHS
 import logging
 from tqdm import tqdm
-from src.shared import cache_path
+from code_complexity.shared import cache_path
 
 logger = logging.getLogger(__name__)
 

@@ -23,19 +23,41 @@ For each task:
 3. Join each agent's resolved labels
 4. Correlate metric values with task success and difficulty
 
-[LM-CC](src/lm_cc.py) follows [Xie et al., 2026](https://arxiv.org/abs/2602.07882): entropy-based segmentation via a code language model, tree-sitter hierarchical decomposition, aggregation over depth and branching factor.
+[LM-CC](code_complexity/lm_cc.py) follows [Xie et al., 2026](https://arxiv.org/abs/2602.07882): entropy-based segmentation via a code language model, tree-sitter hierarchical decomposition, aggregation over depth and branching factor.
 
-[Graphs](src/graphs.py) uses [Scalpel](https://github.com/SMAT-Lab/Scalpel): a libary for static code analysis and [PyCG](https://arxiv.org/pdf/2103.00587): a libary for call graph generation. 
+[Graphs](code_complexity/graphs.py) uses [Scalpel](https://github.com/SMAT-Lab/Scalpel): a libary for static code analysis and [PyCG](https://arxiv.org/pdf/2103.00587): a libary for call graph generation. 
 ## Setup
 
 ```bash
 git clone https://github.com/Sharkoon1/code-complexity-llm-performance.git
 cd code-complexity-llm-performance
 
-uv sync
+uv sync                # core metrics + pipeline/analysis + dev tools
+uv sync --extra lmcc   # additionally torch, transformers, tree-sitter for LM-CC (run_swe_bench*.py, make verify)
 ```
 
-Requires Python 3.12+
+Requires Python 3.12 (Scalpel does not support 3.13+).
+
+## Use as a package
+
+The metrics are importable as the package `code_complexity` (the `code_complexity/` directory,
+built with hatchling). The core install has no torch/transformers; LM-CC comes with the extra `lmcc`.
+
+```bash
+uv add "code-complexity @ git+https://github.com/Sharkoon1/code-complexity-llm-performance@v1.0.0"
+```
+
+```python
+from code_complexity import measure_file, measure_code
+
+metrics = measure_file("path/to/module.py")  # or measure_code(source_text)
+metrics["loc"], metrics["nesting_max"], metrics["pdg_max_fan_in"], metrics["cg_max_out_degree"]
+```
+
+`measure_file` / `measure_code` apply the same normalization as the pipeline (docstrings and
+decorators removed, formatted with black's defaults) before computing the classical, AST and graph
+metrics, so the values match `results/*.parquet`. LM-CC is off by default;
+`measure_file(path, lm_cc=True)` needs the `lmcc` extra.
 
 For LM-CC, a local language model (default `Qwen/Qwen2.5-Coder-0.5B`) is downloaded on the  first run. The Qwen default is for testing. For the pipeline [CodeLlama-7b](https://huggingface.co/meta-llama/CodeLlama-7b-hf).
 

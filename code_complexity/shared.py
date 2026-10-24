@@ -1,4 +1,4 @@
-from src.config import PATHS
+from code_complexity.config import PATHS
 from pathlib import Path
 
 

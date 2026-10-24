@@ -1,7 +1,7 @@
 .PHONY: format test run-swe-bench run-swe-bench-live verify verify-model
 
 format:
-	uv run black src tests
+	uv run black code_complexity tests
 
 test:
 	uv run pytest

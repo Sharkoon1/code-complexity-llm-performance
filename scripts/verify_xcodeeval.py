@@ -12,10 +12,10 @@ import pandas as pd
 from scipy.stats import norm, spearmanr
 from tqdm import tqdm
 
-from src.config import PATHS
-from src.block_tree import get_code_with_boundaries, CodeBlockProcessor
-from src.lm_cc import compute_lm_cc, _get_lmcc
-from src.analysis.correlation import partial_spearman
+from code_complexity.config import PATHS
+from code_complexity.block_tree import get_code_with_boundaries, CodeBlockProcessor
+from code_complexity.lm_cc import compute_lm_cc, _get_lmcc
+from code_complexity.analysis.correlation import partial_spearman
 
 DATA_DIR = PATHS.DATA / "verification" / "xcodeeval_apr"
 THRESHOLD = 0.67

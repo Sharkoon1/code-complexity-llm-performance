@@ -5,7 +5,9 @@ import os
 import numpy as np
 import pytest
 
-from src.lm_cc import (
+pytest.importorskip("torch")  # LM-CC extra
+
+from code_complexity.lm_cc import (
     _get_lmcc,
     _get_total_branch,
     _get_depth_sum,

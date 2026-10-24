@@ -1,27 +1,34 @@
-import pandas as pd
+"""Complexity metrics for Python source code (whole file or function source).
+
+Core metrics -- classical (radon, complexipy), AST-based (nesting, tokens, counts) and
+graph-based (PyCG call graph, Scalpel program dependence graph) -- need only the core
+dependencies. LM-CC is optional (``code-complexity[lmcc]``) and is imported on demand.
+"""
+
 import ast
+import io
 import logging
 import tokenize
-import io
-from dataclasses import dataclass
-from src.config import PATHS
-from src.shared import cache_path
-from src.graphs import compute_graph_metrics
-from src.lm_cc import compute_lm_cc
-from src.preprocess import normalize
-from src.patches import extract_patched_functions
+from pathlib import Path
+
+from complexipy import code_complexity
 from radon.complexity import cc_visit
 from radon.metrics import h_visit, mi_visit
 from radon.raw import analyze
-from complexipy import code_complexity
-from tqdm import tqdm
+
+from code_complexity.graphs import compute_graph_metrics
+from code_complexity.preprocess import normalize as normalize_source
 
 logger = logging.getLogger(__name__)
 
 
-def metrics_for_code(code: str) -> dict:
-    """All complexity metrics (classical + LM-CC + graph) for a single code string."""
-    return {
+def metrics_for_code(code: str, lm_cc: bool = True) -> dict:
+    """All complexity metrics (classical + LM-CC + graph) for a single code string.
+
+    ``code`` is expected to be normalized already (see :func:`measure_code`). With
+    ``lm_cc=False`` the LM-CC features are skipped and torch is never imported.
+    """
+    metrics = {
         **_compute_cyclomatic(code),
         **_compute_cognitive(code),
         **_compute_maintainability(code),
@@ -31,76 +38,36 @@ def metrics_for_code(code: str) -> dict:
         **_compute_token_count(code),
         **_compute_function_count(code),
         **_compute_branches(code),
-        **compute_lm_cc(code),
-        **compute_graph_metrics(code),
     }
+    if lm_cc:
+        from code_complexity.lm_cc import compute_lm_cc  # optional extra: torch, transformers
+
+        metrics.update(compute_lm_cc(code))
+    metrics.update(compute_graph_metrics(code))
+    return metrics
 
 
-def compute_whole_file_metrics(filtered_dataset: pd.DataFrame) -> pd.DataFrame:
-    metrics_list = []
+def measure_code(code: str, *, normalize: bool = True, lm_cc: bool = False) -> dict:
+    """Whole-file metrics for a Python source string, as computed in the project work.
 
-    for _, row in tqdm(filtered_dataset.iterrows(), total=len(filtered_dataset)):
-        cache = cache_path(row["repo"], row["base_commit"], row["python_files"][0])
-        try:
-            raw_code = cache.read_text()
-        except OSError as e:
-            logger.error(f"Error reading cache for {row['instance_id']}: {e}")
-            raise
-        metrics = {"instance_id": row["instance_id"]}
+    With ``normalize=True`` (default) the source is first stripped of docstrings and
+    decorators and formatted with black, exactly like the SWE-bench pipeline; all
+    metrics (``loc``, ``nesting_max``, ``pdg_max_fan_in``, ``cg_max_out_degree``, ...)
+    refer to the normalized code. LM-CC is off by default.
 
-        try:
-            code = normalize(raw_code)
-            if code is None:
-                raise ValueError("preprocessing (black) failed")
-            metrics.update({"parsable": True, **metrics_for_code(code)})
-        except Exception as e:
-            logger.error(f"Error computing metrics for {row['instance_id']}: {e}")
-            metrics["parsable"] = False
-            metrics["error"] = f"{type(e).__name__}: {e}"
-
-        metrics_list.append(metrics)
-
-    return pd.DataFrame(metrics_list)
+    Raises ``ValueError`` when the source cannot be normalized (black failed or nothing
+    is left); parser errors of un-normalized code propagate.
+    """
+    if normalize:
+        code = normalize_source(code)
+        if code is None:
+            raise ValueError("preprocessing (black) failed")
+    return metrics_for_code(code, lm_cc=lm_cc)
 
 
-def compute_function_metrics(filtered_dataset: pd.DataFrame) -> pd.DataFrame:
-    metrics_list = []
-
-    for _, row in tqdm(filtered_dataset.iterrows(), total=len(filtered_dataset)):
-        metrics = {"instance_id": row["instance_id"]}
-        try:
-            raw_code = cache_path(
-                row["repo"], row["base_commit"], row["python_files"][0]
-            ).read_text()
-            function_source = extract_patched_functions(
-                row["patch"], raw_code, row["python_files"][0]
-            )
-            if function_source is None:
-                metrics.update(has_patched_function=False, parsable=True)
-            else:
-                code = normalize(function_source)
-                if code is None:
-                    raise ValueError("preprocessing (black) failed")
-                metrics.update(
-                    has_patched_function=True,
-                    parsable=True,
-                    **metrics_for_code(code),
-                )
-        except Exception as error:
-            logger.error(
-                f"Error computing function metrics for {row['instance_id']}: {error}"
-            )
-            metrics["parsable"] = False
-            metrics["error"] = f"{type(error).__name__}: {error}"
-
-        metrics_list.append(metrics)
-
-    excluded = sum(1 for entry in metrics_list if not entry.get("has_patched_function"))
-    logger.info(
-        f"Function-level: {len(metrics_list) - excluded}/{len(metrics_list)} tasks "
-        f"have a patched function ({excluded} excluded)."
-    )
-    return pd.DataFrame(metrics_list)
+def measure_file(path: str | Path, **kwargs) -> dict:
+    """Whole-file metrics for a Python file (read as UTF-8); see :func:`measure_code`."""
+    return measure_code(Path(path).read_text(encoding="utf-8"), **kwargs)
 
 
 def _compute_cyclomatic(code: str) -> dict:
@@ -134,6 +101,7 @@ def _compute_cognitive(code: str) -> dict:
 
 def _compute_maintainability(code: str) -> dict:
     return {"maintainability_index": mi_visit(code, True)}
+
 
 def _compute_halstead(code: str) -> dict:
     h = h_visit(code).total

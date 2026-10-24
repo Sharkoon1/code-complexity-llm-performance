@@ -4,11 +4,18 @@ import ast
 import logging
 import os
 import subprocess
+import sys
 import tempfile
 import uuid
+from pathlib import Path
 from textwrap import dedent
 
 logger = logging.getLogger(__name__)
+
+# black of the current environment, pinned to its defaults: the (empty) config file disables
+# the lookup of project/user configuration, so the formatting does not depend on the machine.
+_BLACK_CONFIG = Path(__file__).with_name("black_defaults.toml")
+_BLACK = [sys.executable, "-m", "black", "--quiet", "--config", str(_BLACK_CONFIG)]
 
 
 def _remove_comments_and_docstrings(code: str) -> str:
@@ -47,7 +54,7 @@ def _format_python_code(code: str):
             f.write(code)
         try:
             subprocess.run(
-                ["black", "--quiet", "--fast", random_filename],
+                [*_BLACK, "--fast", random_filename],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -55,7 +62,7 @@ def _format_python_code(code: str):
         except subprocess.CalledProcessError as e:
             try:
                 subprocess.run(
-                    ["black", "--quiet", random_filename],
+                    [*_BLACK, random_filename],
                     check=True,
                     capture_output=True,
                     text=True,

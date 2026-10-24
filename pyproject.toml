@@ -1,45 +1,64 @@
 [project]
-name = "projekt"
-version = "0.1.0"
-description = "Add your description here"
+name = "code-complexity"
+version = "1.0.0"
+description = "Code complexity metrics for Python files (classical, call graph, program dependence graph, optional LM-CC) and the SWE-bench pipeline of the project work"
 readme = "README.md"
-requires-python = ">=3.12,<3.13" 
+requires-python = ">=3.12,<3.13"
+# Core: everything measure_file / measure_code need. Upper bounds keep a fresh resolve
+# reproducing the project-work numbers (formatting and counting rules of these libraries).
 dependencies = [
-    "accelerate>=1.13.0",
-    "black>=24.0.0",
-    "complexipy>=5.6.1",
-    "datasets>=4.8.5",
-    "gitpython>=3.1.50",
-    "graphviz>=0.21",
-    "jupyter>=1.1.1",
-    "matplotlib>=3.10.9",
-    "networkx>=3.6.1",
-    "numpy>=2.4.5",
-    "openai>=2.38.0",
-    "pandas>=3.0.3",
-    "pingouin>=0.6.1",
+    "black>=26.5.1,<27",
+    "complexipy>=5.6.1,<6",
+    "networkx>=3.6.1,<4",
     "pycg==0.0.7",
-    "python-dotenv>=1.2.2",
-    "python-scalpel>=1.0b0",
-    "radon>=6.0.1",
-    "scipy>=1.17.1",
-    "seaborn>=0.13.2",
-    "statsmodels>=0.14.6",
-    "tiktoken>=0.13.0",
+    "python-scalpel==1.0b0",
+    "radon>=6.0.1,<7",
+]
+
+[project.optional-dependencies]
+# LM-CC (Xie et al. 2026): code language model + tree-sitter block tree
+lmcc = [
     "torch>=2.12.0",
     "transformers>=5.8.1",
     "tree-sitter>=0.25.2",
     "tree-sitter-python>=0.25.0",
-    "unidiff>=0.7.5",
 ]
 
 [dependency-groups]
+# SWE-bench pipeline (run_swe_bench*.py), analysis helpers and notebooks. Installed by default
+# in this repository (tool.uv.default-groups), never pulled in by consumers of the package.
+pipeline = [
+    "datasets>=4.8.5",
+    "graphviz>=0.21",
+    "jupyter>=1.1.1",
+    "matplotlib>=3.10.9",
+    "numpy>=2.4.5",
+    "pandas>=3.0.3",
+    "pyarrow",
+    "requests",
+    "scipy>=1.17.1",
+    "seaborn>=0.13.2",
+    "tqdm",
+    "unidiff>=0.7.5",
+]
 dev = [
     "ipykernel>=6.29",
-    "jupyter>=1.0",
     "pytest>=9.0.3",
     "pyzmq>=26",
 ]
+
+[tool.uv]
+default-groups = ["dev", "pipeline"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["code_complexity"]
+
+[tool.hatch.build.targets.sdist]
+only-include = ["code_complexity", "tests", "README.md"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

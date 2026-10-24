@@ -1,10 +1,14 @@
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
 
 @dataclass(frozen=True)
 class Config:
-    ROOT: Path = Path(__file__).resolve().parent.parent
+    # repository root (editable install); override with CODE_COMPLEXITY_ROOT elsewhere
+    ROOT: Path = Path(
+        os.environ.get("CODE_COMPLEXITY_ROOT", Path(__file__).resolve().parents[1])
+    )
 
     DATA: Path = ROOT / "data"
     RAW: Path = DATA / "raw"

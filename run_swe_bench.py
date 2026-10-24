@@ -1,15 +1,15 @@
-from src.load import (
+from code_complexity.load import (
     load_swe_bench,
     fetch_swe_bench_submission_labels,
     fetch_all_swe_bench_submissions,
     aggregate_resolution_rate,
     fetch_all_pre_patch_files,
 )
-from src.build import build_swe_bench_filtered_dataset
-from src.logging import setup_logging
-from src.config import PATHS
-from src.metrics import compute_whole_file_metrics, compute_function_metrics
-from src.sink import sink
+from code_complexity.build import build_swe_bench_filtered_dataset
+from code_complexity.logging import setup_logging
+from code_complexity.config import PATHS
+from code_complexity.swe_metrics import compute_whole_file_metrics, compute_function_metrics
+from code_complexity.sink import sink
 
 
 def run_swe_bench_pipeline():

@@ -1,21 +1,24 @@
-"""Scalpel call graph and program dependence graph."""
+"""PyCG call graph and Scalpel program dependence graph."""
 
+import json
 import logging
-import multiprocessing as mp
 import os
+import subprocess
+import sys
 import tempfile
 import time
-from queue import Empty
+from pathlib import Path
 
 import networkx as nx
 from scalpel.SSA.const import SSA
-from scalpel.call_graph.pycg import CallGraphGenerator
+from pycg.pycg import CallGraphGenerator  # scalpel.call_graph.pycg is a no-op wrapper that needs pkg_resources
 from scalpel.cfg import CFGBuilder
 
 logger = logging.getLogger(__name__)
 
 _CALL_GRAPH_TIMEOUT = int(os.environ.get("GRAPH_CALL_TIMEOUT", "600"))
 _CALL_GRAPH_POLL = 30
+_WORKER_MODULE = "code_complexity._call_graph_worker"
 
 
 def _patch_pycg() -> None:
@@ -101,7 +104,8 @@ def _build_call_graph(code: str) -> nx.DiGraph:
         module = os.path.join(tmp, "module.py")
         with open(module, "w", encoding="utf-8") as fh:
             fh.write(code)
-        generator = CallGraphGenerator([module], tmp)
+        # same arguments the scalpel.call_graph.pycg wrapper used (max_iter=-1, operation="call-graph")
+        generator = CallGraphGenerator([module], tmp, -1, "call-graph")
         generator.analyze()
         functions = _internal_functions(generator)
         edges = [
@@ -116,49 +120,50 @@ def _build_call_graph(code: str) -> nx.DiGraph:
     return graph
 
 
-def _call_graph_worker(code: str, out_queue) -> None:
-    try:
-        out_queue.put(("ok", _metrics_from_call_graph(_build_call_graph(code))))
-    except Exception as e:
-        out_queue.put(("err", f"{type(e).__name__}: {e}"))
-
-
 def _call_graph_metrics(code: str) -> dict:
+    """Call-graph metrics computed by PyCG in a separate interpreter.
+
+    PyCG can take very long or hang on some files, so it runs as a subprocess
+    (``python -m code_complexity._call_graph_worker <file>``) that is killed after
+    GRAPH_CALL_TIMEOUT seconds (default 600); failures and timeouts yield zeros, as in
+    the project-work pipeline. A subprocess (instead of a forked worker) behaves the
+    same in scripts, pytest and Jupyter kernels on every platform.
+    """
     n_lines = code.count("\n") + 1
     logger.info(f"call graph: analyzing {n_lines} lines with PyCG ...")
     start = time.perf_counter()
 
-    ctx = mp.get_context("fork")
-    out_queue = ctx.Queue()
-    proc = ctx.Process(target=_call_graph_worker, args=(code, out_queue), daemon=True)
-    proc.start()
-
-    while True:
-        try:
-            status, payload = out_queue.get(timeout=_CALL_GRAPH_POLL)
-            break
-        except Empty:
-            waited = time.perf_counter() - start
-            if not proc.is_alive():
-                status, payload = "err", "worker exited without a result"
+    with tempfile.TemporaryDirectory() as tmp:
+        source = Path(tmp) / "source.py"
+        source.write_text(code, encoding="utf-8")
+        proc = subprocess.Popen(
+            [sys.executable, "-m", _WORKER_MODULE, str(source)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        while True:
+            try:
+                stdout, stderr = proc.communicate(timeout=_CALL_GRAPH_POLL)
                 break
-            if waited >= _CALL_GRAPH_TIMEOUT:
-                proc.kill()
-                proc.join()
-                logger.warning(
-                    f"call graph TIMED OUT after {waited:.0f}s ({n_lines} lines); using zeros"
-                )
-                return _zero_call_graph_metrics()
-            logger.info(f"call graph: still running ({n_lines} lines, {waited:.0f}s) ...")
+            except subprocess.TimeoutExpired:
+                waited = time.perf_counter() - start
+                if waited >= _CALL_GRAPH_TIMEOUT:
+                    proc.kill()
+                    proc.communicate()
+                    logger.warning(
+                        f"call graph TIMED OUT after {waited:.0f}s ({n_lines} lines); using zeros"
+                    )
+                    return _zero_call_graph_metrics()
+                logger.info(f"call graph: still running ({n_lines} lines, {waited:.0f}s) ...")
 
-    proc.join(timeout=5)
-    if proc.is_alive():
-        proc.kill()
-
-    if status == "err":
-        logger.warning(f"call graph FAILED ({n_lines} lines): {payload}")
+    if proc.returncode != 0:
+        reason = stderr.strip().splitlines()[-1] if stderr.strip() else f"exit code {proc.returncode}"
+        logger.warning(f"call graph FAILED ({n_lines} lines): {reason}")
         return _zero_call_graph_metrics()
 
+    payload = json.loads(stdout)
     elapsed = time.perf_counter() - start
     if elapsed > 1:
         logger.info(
@@ -417,3 +422,4 @@ def call_graph(code: str) -> nx.DiGraph:
 
 def program_dependence_graph(code: str, function: str = None) -> nx.DiGraph:
     return _build_pdg(code, {function} if function else None)
+
