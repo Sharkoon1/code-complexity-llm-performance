@@ -14,6 +14,7 @@ dependencies = [
     "jupyter>=1.1.1",
     "matplotlib>=3.10.9",
     "networkx>=3.6.1",
+    "numpy>=2.4.5",
     "openai>=2.38.0",
     "pandas>=3.0.3",
     "pingouin>=0.6.1",
